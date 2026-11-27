@@ -9,6 +9,7 @@
 
 import { heuristicExtract, rowsToSessions, attachKnownFlags, type TableRow } from '../core/extract.js'
 import { parseCsv } from '../core/csv.js'
+import * as XLSX from 'xlsx'
 import { collectRedFlags, computeCalendarSpan, dailyChecklist, inspectDailyGaps, scorePayload } from '../core/score.js'
 import type {
   DailyProgress,
@@ -66,6 +67,22 @@ const MAX_TEXT = 4000
 
 /** 模型调用超时（毫秒）；超时即降级规则。 */
 const MODEL_TIMEOUT_MS = 20_000
+
+/**
+ * 清洗模型输出：去掉工具调用标记、思考标签与多余空白。
+ *
+ * 视觉模型有时会把 `vision_describe` 之类的调用写成纯文本（DSML / XML 风格），
+ * 这段标记对结构化抽取毫无意义，留着会污染 raw_text 并误导下游。
+ */
+export function cleanModelText(raw: string): string {
+  return raw
+    .replace(/<[｜|]{2}[\s\S]*?[｜|]{2}>/g, ' ')
+    .replace(/<\|?\|?DSML[\s\S]*?\/\|?\|?DSML[\s\S]*?>/gi, ' ')
+    .replace(/<\/?[a-zA-Z_][\w-]*(\s[^>]*)?>/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 /** 从模型输出里剥掉 ```json 围栏。 */
 export function stripJsonFence(content: string): string {
@@ -224,13 +241,41 @@ export class HealthService {
     return { session: merged, source, warning }
   }
 
-  /** 表格导入（CSV 文本或已解析的行）。 */
-  async submitTable(input: { rows?: TableRow[]; csv?: string; filename?: string; date?: string }): Promise<{
+  /**
+   * Excel / CSV 文件 → 行对象。
+   *
+   * `.csv` 走文本解析；其余按 Excel 处理（xlsx 读第一个工作表）。
+   */
+  parseTableFile(base64: string, filename: string): TableRow[] {
+    const lower = filename.toLowerCase()
+    if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
+      const text = Buffer.from(base64, 'base64').toString('utf8')
+      return parseCsv(text) as unknown as TableRow[]
+    }
+    const buffer = Buffer.from(base64, 'base64')
+    const workbook = XLSX.read(buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+    if (!sheetName) throw new Error('这个 Excel 里没有工作表。')
+    const sheet = workbook.Sheets[sheetName]
+    if (!sheet) throw new Error('读不到第一个工作表。')
+    return XLSX.utils.sheet_to_json<TableRow>(sheet, { defval: '', raw: false })
+  }
+
+  /** 表格导入（CSV 文本、已解析的行，或 base64 文件）。 */
+  async submitTable(input: { rows?: TableRow[]; csv?: string; fileBase64?: string; filename?: string; date?: string }): Promise<{
     sessions: SessionRecord[]
     imported: number
     redFlags: string[]
   }> {
-    const rows = input.rows ?? (input.csv ? parseCsv(input.csv) : [])
+    // 三种来源按优先级取第一个真正有内容的：已解析行 > 上传文件 > 粘贴文本。
+    let rows: TableRow[] = []
+    if (input.rows && input.rows.length > 0) {
+      rows = input.rows
+    } else if (input.fileBase64) {
+      rows = this.parseTableFile(input.fileBase64, input.filename ?? 'upload.csv')
+    } else if (input.csv) {
+      rows = parseCsv(input.csv) as unknown as TableRow[]
+    }
     if (rows.length === 0) throw new Error('表格里没有可识别的行。')
     const parsed = rowsToSessions(rows, input.date ?? null)
     if (parsed.length === 0) throw new Error('表格里没有认得的列，请确认表头。')
@@ -245,36 +290,103 @@ export class HealthService {
     }
   }
 
+  /** 当前生效的识图通道：设置优先，其次与抽取模型一致。 */
+  resolveVision(settings: HealthSettings): { provider: string; model: string } | null {
+    if (settings.visionProvider && settings.visionModel) {
+      return { provider: settings.visionProvider, model: settings.visionModel }
+    }
+    return this.resolveModel(settings)
+  }
+
   /**
-   * 图片导入：先存附件，再请视觉模型读成结构化记录。
+   * 图片预览：读取图片并返回结构化草稿，不写库。
    *
-   * 没配模型或没视觉能力时不猜——直接抛错说明缺什么，避免把「未识别」当「没摄入」。
+   * 双通道：先用识图通道把图中内容读成文本，再交给文本抽取模型做结构化；
+   * 识图通道与文本模型是同一个模型时，仍然走同一条「先读后抽」的路径，
+   * 这样模型不支持一次调用同时识图与出 JSON 也不会中断。
    */
-  async submitImage(input: { base64: string; mediaType: string; name?: string; date?: string; note?: string }): Promise<{
-    session: SessionRecord
+  async previewImage(input: { base64: string; mediaType: string; name?: string; date?: string; note?: string }): Promise<{
+    draft: SessionRecord
     source: ExtractionSource
+    visionModel: string
     warning: string
   }> {
     const settings = await this.settings()
     const date = input.date ?? localDay()
     if (!this.host.streamText || !this.host.saveImage) {
-      throw new Error('当前宿主没有可用的视觉抽取能力；请改传 CSV 或改用文字打卡。')
+      throw new Error('当前宿主没有可用的识图能力（缺少附件或模型服务）。')
     }
-    const selection = this.resolveModel(settings)
-    if (!selection) throw new Error('还没有指定抽取模型：请在插件设置里选择 provider 与模型。')
+    const vision = this.resolveVision(settings)
+    if (!vision) throw new Error('还没有指定识图模型：请在设置里配置模型或识图通道。')
     const attachment = await this.host.saveImage(input.base64, input.mediaType, input.name ?? 'checkin-image')
     const note = String(input.note ?? '').slice(0, MAX_TEXT)
-    const raw = await this.callStream({
-      provider: selection.provider,
-      model: selection.model,
-      text: note || '请读取这张图片里的健康记录内容。',
-      image: attachment,
-    })
-    const parsed = this.parseModelJson(raw)
-    const session = normalizeModelOutput(parsed, note, date)
-    if (!session) throw new Error('图片没有读出可用的结构化内容；请补一句文字说明再试。')
-    const merged = await this.store.mergeAndSaveSession(session, 'image_ocr')
-    return { session: merged, source: 'image', warning: '' }
+
+    // 第一步：识图通道把图片读成文字。
+    let imageText = ''
+    try {
+      const rawImageText = await this.callStream({
+        provider: vision.provider,
+        model: vision.model,
+        text: note
+          || '直接读出图片里的健康数值：体重、蛋白质、训练内容与时长、睡眠、心率、步数等。'
+             + '用简体中文分条写，每行一个数值。不要调用任何工具，不要输出标签或 JSON。',
+        image: attachment,
+      })
+      imageText = cleanModelText(rawImageText)
+    } catch (error) {
+      throw new Error(`识图失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!imageText.trim()) throw new Error('识图通道没有返回内容，请换一张更清晰的图片。')
+
+    // 第二步：文本抽取模型把文字读成结构化字段。
+    const extraction = this.resolveModel(settings)
+    let draft: SessionRecord | null = null
+    let warning = ''
+    if (extraction) {
+      try {
+        const raw = await this.callStream({
+          provider: extraction.provider,
+          model: extraction.model,
+          text: `打卡日期: ${date}\n图片里读到的内容:\n${imageText}\n\n补充说明: ${note}`,
+        })
+        draft = normalizeModelOutput(this.parseModelJson(raw), imageText, date)
+      } catch (error) {
+        warning = `结构化抽取失败，已保留识图原文：${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+    if (!draft) {
+      draft = attachKnownFlags({
+        date,
+        raw_text: imageText,
+        red_flags: [],
+        body_required: {},
+        psych_required: {},
+        optional: {},
+      } as SessionRecord)
+      warning = warning || '没有可用的文本抽取模型，只保留了识图原文，请手动补字段。'
+    }
+    return { draft, source: 'image', visionModel: `${vision.provider}/${vision.model}`, warning }
+  }
+
+  /** 图片写入：把预览确认后的草稿落库。 */
+  async commitSession(session: SessionRecord, source: SourceType = 'image_ocr'): Promise<SessionRecord> {
+    const merged = await this.store.mergeAndSaveSession(session, source)
+    return merged
+  }
+
+  /**
+   * 图片导入（一步到位版，供工具与旧调用方使用）。
+   *
+   * 没配模型或没视觉能力时不猜——直接抛错说明缺什么，避免把「未识别」当「没摄入」。
+   */
+  async submitImage(input: { base64: string; mediaType: string; name?: string; date?: string; note?: string; confirmed?: boolean }): Promise<{
+    session: SessionRecord
+    source: ExtractionSource
+    warning: string
+  }> {
+    const preview = await this.previewImage(input)
+    const merged = await this.commitSession(preview.draft, 'image_ocr')
+    return { session: merged, source: 'image', warning: preview.warning }
   }
 
   /** 从旧记忆库导入。 */

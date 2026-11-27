@@ -16,6 +16,10 @@ export interface HealthSettings {
     extractionProvider: string;
     /** 抽取用的模型 id；空表示沿用 DSH 当前默认模型。 */
     extractionModel: string;
+    /** 识图通道 provider；空表示沿用抽取模型。 */
+    visionProvider: string;
+    /** 识图通道 model；空表示沿用抽取模型。 */
+    visionModel: string;
     /** 每日首次打开时是否自动开新会话追问。 */
     dailyAskEnabled: boolean;
     /** 每日追问的目标工作区路径；空表示当前会话工作区。 */
@@ -24,6 +28,8 @@ export interface HealthSettings {
     dailyAskTime: string;
     /** 追问后多久没回复就升级追问（小时）。 */
     escalateHours: number;
+    /** 打开 DSH 时是否自动检测并追问。 */
+    autoPromptOnOpen: boolean;
     /** 是否允许把气泡投喂给 dsh-pet。 */
     petEnabled: boolean;
     /** 图片发送给模型前是否需要确认。 */
@@ -59,6 +65,10 @@ export interface FollowUpState {
     lastClientError: string;
     /** 最近一次向宿主 index 注入兜底脚本的时间戳。 */
     lastIndexInject: number;
+    /** 最近一次「打开即检测」自动追问的日期，用于当日去重。 */
+    autoPromptDate: string;
+    /** 当日自动追问所创建的会话 id；为空表示没建成。 */
+    autoPromptSessionId: string;
 }
 /** 空的追问状态。 */
 export declare const EMPTY_FOLLOW_UP: FollowUpState;

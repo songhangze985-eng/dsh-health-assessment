@@ -40,6 +40,20 @@ export declare class FollowUpManager {
     /** 清掉待投喂气泡（客户端已投递）。 */
     ackPet(): Promise<void>;
     /**
+     * 「打开即检测」自动追问。
+     *
+     * 触发条件：设置开启 + 档案缺项或今日必填未齐 + 当天还没跑过。
+     * 去重靠 `autoPromptDate`（持久化在 followup.json），重启/刷新都不会重复建会话。
+     *
+     * @returns 是否创建了会话，以及原因。
+     */
+    autoPrompt(): Promise<{
+        ok: boolean;
+        created: boolean;
+        detail: string;
+        date: string;
+    }>;
+    /**
      * 立刻跑一次真实的今日追问（面板/诊断用）。
      *
      * 先清掉「今天已经问过」的标记，再走与定时检查完全相同的 `tick` 路径——

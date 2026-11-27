@@ -39,6 +39,13 @@ export interface ExtractionHost {
 }
 /** 结构化抽取的系统提示词（移植自上游 `EXTRACTION_SYSTEM_PROMPT`）。 */
 export declare const EXTRACTION_SYSTEM_PROMPT = "\u4F60\u662F\u5065\u5EB7\u6253\u5361\u7684\u7ED3\u6784\u5316\u63D0\u53D6\u5668\u3002\n\u628A\u7528\u6237\u81EA\u8FF0\u6216\u56FE\u7247\u91CC\u5DF2\u7ECF\u51FA\u73B0\u7684\u5185\u5BB9\u63D0\u53D6\u6210 JSON\u3002\u4E0D\u8981\u8BA1\u7B97\u5206\u6570\uFF0C\u4E0D\u8981\u7F16\u9020\u6CA1\u63D0\u5230\u7684\u6570\u5B57\uFF0C\u4E0D\u8981\u4E0B\u8BCA\u65AD\u3002\n\u7EA2\u65D7\u53EA\u5728\u539F\u6587\u786E\u5B9E\u51FA\u73B0\u80F8\u75DB\u3001\u660F\u53A5\u3001\u6655\u53A5\u3001\u81EA\u4F24\u3001\u8F7B\u751F\u3001\u81EA\u884C\u505C\u836F\u3001\u6025\u6027\u5267\u75DB\u3001\u547C\u5438\u56F0\u96BE\u3001\u5F02\u5E38\u5FC3\u60B8\u3001\u9AA8\u88C2\u3001\u5173\u8282\u6025\u6027\u80BF\u80C0\u65F6\u5199\u5165 red_flags\u3002\n\u8F93\u51FA JSON:\n{\n  \"date\": \"YYYY-MM-DD\",\n  \"red_flags\": [],\n  \"body_required\": {\"protein_g\": null, \"resistance_done\": null, \"progressive_overload\": null},\n  \"psych_required\": {\"self_rating_1_to_5\": null, \"feedback_category\": null},\n  \"optional\": {\"sleep_quality\": null, \"anti_inflammatory_diet\": null, \"stress_relief\": null, \"focus_state\": null},\n  \"pet_reply\": \"30\u5B57\u4EE5\u5185\u7684\u684C\u5BA0\u56DE\u5E94\uFF0C\u4E0D\u7ED9\u533B\u7597\u5EFA\u8BAE\"\n}";
+/**
+ * 清洗模型输出：去掉工具调用标记、思考标签与多余空白。
+ *
+ * 视觉模型有时会把 `vision_describe` 之类的调用写成纯文本（DSML / XML 风格），
+ * 这段标记对结构化抽取毫无意义，留着会污染 raw_text 并误导下游。
+ */
+export declare function cleanModelText(raw: string): string;
 /** 从模型输出里剥掉 ```json 围栏。 */
 export declare function stripJsonFence(content: string): string;
 /**
@@ -101,10 +108,17 @@ export declare class HealthService {
         source: ExtractionSource;
         warning: string;
     }>;
-    /** 表格导入（CSV 文本或已解析的行）。 */
+    /**
+     * Excel / CSV 文件 → 行对象。
+     *
+     * `.csv` 走文本解析；其余按 Excel 处理（xlsx 读第一个工作表）。
+     */
+    parseTableFile(base64: string, filename: string): TableRow[];
+    /** 表格导入（CSV 文本、已解析的行，或 base64 文件）。 */
     submitTable(input: {
         rows?: TableRow[];
         csv?: string;
+        fileBase64?: string;
         filename?: string;
         date?: string;
     }): Promise<{
@@ -112,8 +126,34 @@ export declare class HealthService {
         imported: number;
         redFlags: string[];
     }>;
+    /** 当前生效的识图通道：设置优先，其次与抽取模型一致。 */
+    resolveVision(settings: HealthSettings): {
+        provider: string;
+        model: string;
+    } | null;
     /**
-     * 图片导入：先存附件，再请视觉模型读成结构化记录。
+     * 图片预览：读取图片并返回结构化草稿，不写库。
+     *
+     * 双通道：先用识图通道把图中内容读成文本，再交给文本抽取模型做结构化；
+     * 识图通道与文本模型是同一个模型时，仍然走同一条「先读后抽」的路径，
+     * 这样模型不支持一次调用同时识图与出 JSON 也不会中断。
+     */
+    previewImage(input: {
+        base64: string;
+        mediaType: string;
+        name?: string;
+        date?: string;
+        note?: string;
+    }): Promise<{
+        draft: SessionRecord;
+        source: ExtractionSource;
+        visionModel: string;
+        warning: string;
+    }>;
+    /** 图片写入：把预览确认后的草稿落库。 */
+    commitSession(session: SessionRecord, source?: SourceType): Promise<SessionRecord>;
+    /**
+     * 图片导入（一步到位版，供工具与旧调用方使用）。
      *
      * 没配模型或没视觉能力时不猜——直接抛错说明缺什么，避免把「未识别」当「没摄入」。
      */
@@ -123,6 +163,7 @@ export declare class HealthService {
         name?: string;
         date?: string;
         note?: string;
+        confirmed?: boolean;
     }): Promise<{
         session: SessionRecord;
         source: ExtractionSource;

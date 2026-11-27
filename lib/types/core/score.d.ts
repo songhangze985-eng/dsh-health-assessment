@@ -99,6 +99,8 @@ export interface ChecklistItem {
     label: string;
     hint: string;
     done: boolean;
+    /** 已完成时展示实际值，例如「140g」「45 分钟」；未完成为空串。 */
+    value: string;
 }
 /**
  * 某一天的必填清单。

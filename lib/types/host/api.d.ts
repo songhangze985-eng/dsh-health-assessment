@@ -23,6 +23,8 @@ export interface ApiHooks {
     ackPet?: () => Promise<void>;
     /** 立刻追问一次并返回诊断。 */
     askNow?: () => Promise<unknown>;
+    /** 运行「打开即检测」的自动追问（带当日去重）。 */
+    autoPrompt?: () => Promise<unknown>;
     /** 浏览器侧插件加载后的心跳；stage 区分 boot / apply，error 带错误文本。 */
     clientHello?: (stage: string, error?: string) => Promise<void>;
 }
