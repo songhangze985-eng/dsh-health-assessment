@@ -80,6 +80,13 @@ export declare class FollowUpManager {
      */
     private dropEmptySession;
     /**
+     * 第二通道：走 UI 同源的 sessionController（createSession + prompt）。
+     *
+     * `agents.create` + `followup` 在 0.2.2-rc.5 上不落盘；这条通道是浏览器新建
+     * 会话时用的同一条服务，语义上更接近「用户真的开了个新对话」。
+     */
+    private openViaController;
+    /**
      * 开一个新会话并发一条追问。
      *
      * 用 `ctx.agents.create` + `followup`：这是宿主里唯一受支持的「新建会话并驱动」路径。
