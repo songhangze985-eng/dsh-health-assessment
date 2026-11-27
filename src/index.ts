@@ -100,16 +100,6 @@ export function apply(ctx: Context, config: Config): void {
 
   registerTools(ctx, service)
 
-  // 兜底入口：往宿主 index 里注入一个脚本，页面左下角会出现「♥ 健康评估」。
-  // 走官方 webserver/index-inject 扩展点，不改宿主代码。
-  ctx.on('webserver/index-inject', (table: unknown) => {
-    const rows = table as { push: (row: unknown) => void }
-    rows.push({ kind: 'script-src', placement: 'head', src: `${API_PREFIX}/plugin.js` })
-    store.loadFollowUp()
-      .then((state) => store.saveFollowUp({ ...state, lastIndexInject: Date.now() }))
-      .catch(() => undefined)
-  })
-
   // webServer 是可选能力：没有它插件照常算分，只是没有面板。
   ctx.inject(['webServer'], (scope) => {
     const followUp = new FollowUpManager(scope as unknown as Context, store, service, pet)

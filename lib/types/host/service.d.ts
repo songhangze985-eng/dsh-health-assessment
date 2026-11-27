@@ -70,11 +70,17 @@ export declare class HealthService {
     /** 今日进度（缺项、完成度、已写选填）。 */
     daily(date?: string): Promise<DailyProgress>;
     /** 汇总状态：面板首屏一次拿全。 */
-    overview(): Promise<{
+    overview(selectedDate?: string): Promise<{
         date: string;
         profile: ProfileRecord;
         profileMissing: string[];
         daily: DailyProgress;
+        checklist: {
+            key: string;
+            label: string;
+            hint: string;
+            done: boolean;
+        }[];
         score: ScoreResult;
         distinctDates: number;
         redFlags: string[];

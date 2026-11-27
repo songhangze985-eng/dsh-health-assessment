@@ -9,7 +9,7 @@
 
 import { heuristicExtract, rowsToSessions, attachKnownFlags, type TableRow } from '../core/extract.js'
 import { parseCsv } from '../core/csv.js'
-import { collectRedFlags, computeCalendarSpan, inspectDailyGaps, scorePayload } from '../core/score.js'
+import { collectRedFlags, computeCalendarSpan, dailyChecklist, inspectDailyGaps, scorePayload } from '../core/score.js'
 import type {
   DailyProgress,
   ProfileRecord,
@@ -159,16 +159,18 @@ export class HealthService {
   }
 
   /** 汇总状态：面板首屏一次拿全。 */
-  async overview(): Promise<{
+  async overview(selectedDate?: string): Promise<{
     date: string
     profile: ProfileRecord
     profileMissing: string[]
     daily: DailyProgress
+    checklist: { key: string; label: string; hint: string; done: boolean }[]
     score: ScoreResult
     distinctDates: number
     redFlags: string[]
     settings: HealthSettings
   }> {
+    const date = selectedDate && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate) ? selectedDate : localDay()
     const [profile, sessions, settings] = await Promise.all([
       this.store.loadProfile(),
       this.store.loadSessions(),
@@ -177,10 +179,11 @@ export class HealthService {
     const score = scorePayload({ profile, sessions })
     const [distinctDates] = computeCalendarSpan(sessions)
     return {
-      date: localDay(),
+      date,
       profile,
       profileMissing: (score.mode === 'blocked_profile' ? (score.missing_profile as string[]) : []) ?? [],
-      daily: inspectDailyGaps(sessions, localDay()) as DailyProgress,
+      daily: inspectDailyGaps(sessions, date) as DailyProgress,
+      checklist: dailyChecklist(sessions, date),
       score,
       distinctDates,
       redFlags: collectRedFlags(sessions),

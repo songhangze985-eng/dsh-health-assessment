@@ -492,6 +492,38 @@ export function inspectDailyGaps(
   }
 }
 
+/** 今日清单的一项：给界面用，只有中文标签与完成状态，不带内部字段名。 */
+export interface ChecklistItem {
+  key: string
+  label: string
+  hint: string
+  done: boolean
+}
+
+/**
+ * 某一天的必填清单。
+ *
+ * 界面只认这里的 label，不认 `protein_g` 之类的字段名；`hint` 是「怎么补」的一句话。
+ */
+export function dailyChecklist(sessions: SessionRecord[], targetDate: string): ChecklistItem[] {
+  const day = sessions.map(normalizeSession).filter((item) => item.date === targetDate)
+  const hasProtein = day.some((item) => sessionProteinRatio(item, 1)[0] !== null)
+  const hasResistance = day.some((item) => sessionHasResistance(item)[0])
+  const hasOverload = overloadObservations(day).length > 0
+  const hasRating = day.some((item) => executionRatio(item.psych_required || {}) !== null)
+  const hasFeedback = day.some((item) => {
+    const psych = item.psych_required || {}
+    return Boolean(psych.classification || psych.feedback_category)
+  })
+  return [
+    { key: 'protein', label: '蛋白质摄入', hint: '写克数，例如「蛋白质 120g」', done: hasProtein },
+    { key: 'resistance', label: '抗阻训练', hint: '写训练内容或分钟数，例如「抗阻 45 分钟」', done: hasResistance },
+    { key: 'overload', label: '渐进超负荷', hint: '写是否加重量或多做一组，例如「加重了卧推」', done: hasOverload },
+    { key: 'rating', label: '执行力与心态自评', hint: '1–5 分，例如「状态 4 分」', done: hasRating },
+    { key: 'feedback', label: '外界评价处理', hint: '可测量就采纳，人身攻击就丢弃，例如「听取建议」', done: hasFeedback },
+  ]
+}
+
 /** 必填五项里缺哪些。 */
 export function requiredGaps(sessions: SessionRecord[], targetG: number): string[] {
   const gaps: string[] = []

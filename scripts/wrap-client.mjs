@@ -37,19 +37,24 @@ const wrapped = `/* dsh-health-assessment 浏览器半侧：由 scripts/wrap-cli
     }).catch(function () {});
   } catch (e) {}
 
-  /** 模块本体：只导出 makeFactory，不含任何副作用。 */
-  var bundle = (function () {
+  /**
+   * 模块本体：包成 function (require)，每次 factory 调用时再执行。
+   * 之前直接在外层求值，导致 bundle 里的 require(...) 在无 require 的作用域运行，
+   * 一执行就 ReferenceError——于是 boot 心跳有值、apply 永远不跑。
+   */
+  function loadBundle(require) {
     var module = { exports: {} };
     var exports = module.exports;
     (function (module, exports, require) {
 ${bundle}
     })(module, exports, require);
     return module.exports;
-  })();
+  }
+
   loader.load({
     id: '${ENTRY_ID}',
     factory: function (require) {
-      var mod = bundle.makeFactory()(require);
+      var mod = loadBundle(require).makeFactory()(require);
       var originalApply = mod.apply;
       mod.apply = function (ctx) {
         try {

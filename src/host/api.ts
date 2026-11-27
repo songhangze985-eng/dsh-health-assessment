@@ -18,7 +18,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ProfileRecord } from '../core/types.js'
 import type { HealthService } from './service.js'
 import type { HealthStore } from './store.js'
-import { renderEntryScript, renderUiPage } from './ui-page.js'
+import { renderUiPage } from './ui-page.js'
 
 /** 路由前缀；带插件特征后缀，防止与生态里的同名插件冲突。 */
 export const API_PREFIX = '/health-assessment-8221'
@@ -135,7 +135,7 @@ export function registerApi(
     },
   }))
 
-  register('/overview', async () => service.overview())
+  register('/overview', async (req) => service.overview(query(req).get('date') ?? undefined))
 
   register('/score', async (req) => {
     const params = query(req)
@@ -250,21 +250,6 @@ export function registerApi(
       rows,
     }
   })
-
-  // 兜底入口脚本：index 注入后由页面加载。
-  disposers.push(ctx.webServer.register({
-    kind: 'prefix',
-    path: `${API_PREFIX}/plugin.js`,
-    handler: async (_req, res) => {
-      const script = renderEntryScript()
-      res.writeHead(200, {
-        'Content-Type': 'application/javascript; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'Content-Length': Buffer.byteLength(script),
-      })
-      res.end(script)
-    },
-  }))
 
   register('/client-hello', async (_req, body) => {
     const input = jsonBody(body)

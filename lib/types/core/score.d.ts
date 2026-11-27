@@ -93,6 +93,19 @@ export declare function normalizeSession(session: SessionRecord): SessionRecord;
 export declare function executionRatio(psych: PsychRequired): number | null;
 /** 某天的缺项与完成度。 */
 export declare function inspectDailyGaps(sessions: SessionRecord[], targetDate?: string | null): DailyProgress;
+/** 今日清单的一项：给界面用，只有中文标签与完成状态，不带内部字段名。 */
+export interface ChecklistItem {
+    key: string;
+    label: string;
+    hint: string;
+    done: boolean;
+}
+/**
+ * 某一天的必填清单。
+ *
+ * 界面只认这里的 label，不认 `protein_g` 之类的字段名；`hint` 是「怎么补」的一句话。
+ */
+export declare function dailyChecklist(sessions: SessionRecord[], targetDate: string): ChecklistItem[];
 /** 必填五项里缺哪些。 */
 export declare function requiredGaps(sessions: SessionRecord[], targetG: number): string[];
 /** 选填评分：写过的小项之间平分 20 分。 */

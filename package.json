@@ -1,6 +1,6 @@
 {
   "name": "dsh-health-assessment",
-  "version": "0.5.1",
+  "version": "0.6.1",
   "description": "个人发展与健康评估：七天内确定性计分，右侧栏面板、模型工具与桌宠播报。",
   "type": "module",
   "license": "MIT",

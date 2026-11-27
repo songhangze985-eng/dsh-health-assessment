@@ -1,20 +1,10 @@
 /**
- * 插件界面：一页铺满的四个区块——输入、输出、评估、设置。
+ * 宿主渲染的回退页面：与 React 主视图同一套信息架构。
  *
- * 刻意不做侧边栏、不做大字号层级：整页是一张仪表盘，所有内容同屏，
- * 字号统一在 13px 一档，数字用等宽，靠间距与分隔线分区而不是靠大小对比。
- *
- * 页面由宿主直接渲染（`GET /health-assessment-8221/ui`），不依赖 DSH 的浏览器
- * 插件加载链，也不会另起一个应用窗口。
+ * 结构一致：顶部单行 Header、65/35 主区、设置抽屉、CSV 收进「历史与导入」。
+ * 只兜底「浏览器插件没挂上」的情况，不是主入口；因此不注入任何悬浮元素。
  *
  * @module dsh-health-assessment/src/host/ui-page
  */
 /** 生成整页 HTML。 */
 export declare function renderUiPage(): string;
-/**
- * 兜底入口脚本：在 DSH 页面左下角放一个固定按钮，点开全屏面板。
- *
- * 与 client 插件的 `sidebar.footer.action` 并行：那条走 Cordis 槽位，这条只依赖
- * 一次 index 注入，用来保证「一定有入口可见」。
- */
-export declare function renderEntryScript(): string;
