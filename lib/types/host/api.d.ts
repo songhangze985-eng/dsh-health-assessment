@@ -21,6 +21,8 @@ export interface ApiHooks {
     followUp?: () => Promise<unknown>;
     /** 清掉待投喂气泡。 */
     ackPet?: () => Promise<void>;
+    /** 立刻追问一次并返回诊断。 */
+    askNow?: () => Promise<unknown>;
 }
 /**
  * 注册全部路由。

@@ -12,6 +12,10 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { readFile, readdir, rm } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { zstdDecompressSync } from 'node:zlib'
 
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -99,6 +103,27 @@ export class FollowUpManager {
     await this.store.saveFollowUp(state)
   }
 
+  /**
+   * 立刻跑一次真实的今日追问（面板/诊断用）。
+   *
+   * 先清掉「今天已经问过」的标记，再走与定时检查完全相同的 `tick` 路径——
+   * 这样返回的就是线上行为，而不是另一套只存在于诊断里的分支。
+   */
+  async askNow(): Promise<{ ok: boolean; detail: string; text: string; pendingBubble: string }> {
+    const state = await this.store.loadFollowUp()
+    state.lastAskDate = ''
+    await this.store.saveFollowUp(state)
+    await this.tick()
+    const after = await this.store.loadFollowUp()
+    const daily = await this.service.daily(localDay())
+    return {
+      ok: after.pendingBubble === '',
+      detail: after.lastAskDetail,
+      text: this.askText(daily),
+      pendingBubble: after.pendingBubble,
+    }
+  }
+
   /** 手动投喂一条。 */
   async say(text: string): Promise<void> {
     await this.pet.say(text)
@@ -131,6 +156,7 @@ export class FollowUpManager {
       : `这一窗合计 ${total}/200 分`
     state.lastPetAt = Date.now()
     state.lastPetScore = total
+    await this.pet.say(state.pendingBubble)
     await this.store.saveFollowUp(state)
   }
 
@@ -148,7 +174,11 @@ export class FollowUpManager {
       state.lastAskDate = today
       state.lastAskAt = now
       state.lastReplyAt = 0
-      if (!opened) state.pendingBubble = text
+      state.lastAskDetail = opened.detail
+      if (!opened.ok) {
+        state.pendingBubble = text
+        if (settings.petEnabled) await this.pet.say(text)
+      }
       await this.store.saveFollowUp(state)
       return
     }
@@ -163,7 +193,11 @@ export class FollowUpManager {
     const opened = await this.openAskSession(text, settings.dailyAskWorkspace)
     state.escalatedDates = [...state.escalatedDates.filter((day) => day !== today), today].slice(-30)
     state.lastAskAt = now
-    if (!opened) state.pendingBubble = text
+    state.lastAskDetail = opened.detail
+    if (!opened.ok) {
+      state.pendingBubble = text
+      if (settings.petEnabled) await this.pet.say(text)
+    }
     await this.store.saveFollowUp(state)
   }
 
@@ -186,17 +220,74 @@ export class FollowUpManager {
   }
 
   /**
+   * 判断新建会话里到底有没有消息。
+   *
+   * 只看「会话文件是否存在」不够：DSH 0.2.2-rc.5 上 `agents.create` 会建出
+   * 一个只有 session 事件的空壳，`followup` 既不报错也不落盘。所以这里直接
+   * 数事件行数，宁可多读一次磁盘，也不要把「静默失败」当成「已经追问过」。
+   */
+  private async sessionHasMessage(sessionId: string): Promise<boolean> {
+    const found = await this.findSessionFile(sessionId)
+    if (!found) return false
+    try {
+      const raw = zstdDecompressSync(await readFile(found)).toString('utf8').trim()
+      return raw.split('\n').length > 1
+    } catch {
+      return false
+    }
+  }
+
+  /** 在 `<DSH_HOME>/sessions/<cwd-key>/<sessionId>/session.v4.jsonl.zstd` 里找会话文件。 */
+  private async findSessionFile(sessionId: string): Promise<string | null> {
+    const base = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'sessions')
+    let dirs: string[]
+    try {
+      dirs = await readdir(base)
+    } catch {
+      return null
+    }
+    for (const dir of dirs) {
+      const file = join(base, dir, sessionId, 'session.v4.jsonl.zstd')
+      try {
+        await readFile(file)
+        return file
+      } catch {
+        continue
+      }
+    }
+    return null
+  }
+
+  /**
+   * 删掉「我们刚建、确认是空壳」的会话目录。
+   *
+   * 只删自己创建且只有一条 session 事件的目录：宁可这条路以后都用不上，
+   * 也不能每天往用户的会话列表里塞一个空对话。
+   */
+  private async dropEmptySession(sessionId: string): Promise<void> {
+    const file = await this.findSessionFile(sessionId)
+    if (!file) return
+    try {
+      const raw = zstdDecompressSync(await readFile(file)).toString('utf8').trim()
+      if (raw.split('\n').length > 1) return
+    } catch {
+      return
+    }
+    await rm(join(file, '..'), { recursive: true, force: true }).catch(() => undefined)
+  }
+
+  /**
    * 开一个新会话并发一条追问。
    *
    * 用 `ctx.agents.create` + `followup`：这是宿主里唯一受支持的「新建会话并驱动」路径。
    * 拿不到 agents 服务、或创建被拒时返回 false，由调用方退回面板提示。
    */
-  private async openAskSession(text: string, workspace: string): Promise<boolean> {
+  private async openAskSession(text: string, workspace: string): Promise<{ ok: boolean; detail: string }> {
     const ctx = this.ctx as unknown as { get?: (name: string) => unknown }
     const agents = ctx.get?.('agents') as
-      | { create?: (options: Record<string, unknown>) => Promise<{ agent?: { followup?: (input: unknown) => unknown } }> }
+      | { create?: (options: Record<string, unknown>) => Promise<Record<string, unknown>> }
       | undefined
-    if (!agents?.create) return false
+    if (!agents?.create) return { ok: false, detail: '宿主没有 agents.create（无法新建会话）' }
     const model = ctx.get?.('agentDefaultModel') as
       | { currentSelection?: () => { provider?: string; model?: string } }
       | undefined
@@ -210,14 +301,31 @@ export class FollowUpManager {
           : undefined,
         cwd: workspace || undefined,
       })
+      // handle 的形状随版本不同：可能是 { agent } 也可能是 Agent 本身。
+      const agent = (handle.agent ?? handle) as { followup?: (input: unknown) => unknown }
+      if (typeof agent.followup !== 'function') {
+        return {
+          ok: false,
+          detail: `handle 没有 followup；keys=${Object.keys(handle).join(',') || '(空)'}`,
+        }
+      }
       const message = workspace ? `${text}\n（工作区：${workspace}）` : text
-      await handle.agent?.followup?.({
+      await agent.followup({
         content: [{ type: 'text', text: message }],
         source: { kind: 'health-assessment' },
       })
-      return true
-    } catch {
-      return false
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      const delivered = await this.sessionHasMessage(sessionId)
+      if (!delivered) {
+        await this.dropEmptySession(sessionId)
+        return {
+          ok: false,
+          detail: `会话 ${sessionId} 已创建，但消息没有落盘（当前 DSH 版本对后台会话的 followup 不生效），已降级为气泡提醒`,
+        }
+      }
+      return { ok: true, detail: `已开会话 ${sessionId} 并投递追问` }
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }
     }
   }
 }

@@ -109,6 +109,7 @@ export function apply(ctx: Context, config: Config): void {
       markReply: () => followUp.markReply(),
       followUp: () => followUp.state(),
       ackPet: () => followUp.ackPet(),
+      askNow: () => followUp.askNow(),
     })
     scope.effect(() => () => {
       stop()

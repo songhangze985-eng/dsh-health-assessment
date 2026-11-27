@@ -35,6 +35,18 @@ export declare class FollowUpManager {
     markReply(): Promise<void>;
     /** 清掉待投喂气泡（客户端已投递）。 */
     ackPet(): Promise<void>;
+    /**
+     * 立刻跑一次真实的今日追问（面板/诊断用）。
+     *
+     * 先清掉「今天已经问过」的标记，再走与定时检查完全相同的 `tick` 路径——
+     * 这样返回的就是线上行为，而不是另一套只存在于诊断里的分支。
+     */
+    askNow(): Promise<{
+        ok: boolean;
+        detail: string;
+        text: string;
+        pendingBubble: string;
+    }>;
     /** 手动投喂一条。 */
     say(text: string): Promise<void>;
     /**
@@ -50,6 +62,23 @@ export declare class FollowUpManager {
     private scheduleReached;
     /** 追问文案：最多列三项缺项。 */
     private askText;
+    /**
+     * 判断新建会话里到底有没有消息。
+     *
+     * 只看「会话文件是否存在」不够：DSH 0.2.2-rc.5 上 `agents.create` 会建出
+     * 一个只有 session 事件的空壳，`followup` 既不报错也不落盘。所以这里直接
+     * 数事件行数，宁可多读一次磁盘，也不要把「静默失败」当成「已经追问过」。
+     */
+    private sessionHasMessage;
+    /** 在 `<DSH_HOME>/sessions/<cwd-key>/<sessionId>/session.v4.jsonl.zstd` 里找会话文件。 */
+    private findSessionFile;
+    /**
+     * 删掉「我们刚建、确认是空壳」的会话目录。
+     *
+     * 只删自己创建且只有一条 session 事件的目录：宁可这条路以后都用不上，
+     * 也不能每天往用户的会话列表里塞一个空对话。
+     */
+    private dropEmptySession;
     /**
      * 开一个新会话并发一条追问。
      *

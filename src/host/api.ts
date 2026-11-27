@@ -32,6 +32,8 @@ export interface ApiHooks {
   followUp?: () => Promise<unknown>
   /** 清掉待投喂气泡。 */
   ackPet?: () => Promise<void>
+  /** 立刻追问一次并返回诊断。 */
+  askNow?: () => Promise<unknown>
 }
 
 /** 读完整请求体。 */
@@ -186,6 +188,8 @@ export function registerApi(
   })
 
   register('/followup', async () => (hooks.followUp ? hooks.followUp() : {}))
+
+  register('/followup/ask', async () => (hooks.askNow ? hooks.askNow() : { ok: false, detail: '未接线' }))
 
   register('/followup/reply', async () => {
     await hooks.markReply?.()

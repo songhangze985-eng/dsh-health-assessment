@@ -77,6 +77,8 @@ export interface FollowUpState {
   lastPetScore: number | null
   /** host 侧待投喂的气泡；client 取走后置空。 */
   pendingBubble: string
+  /** 最近一次追问的结论文本（成功或失败原因），便于面板与排查。 */
+  lastAskDetail: string
 }
 
 /** 空的追问状态。 */
@@ -88,6 +90,7 @@ export const EMPTY_FOLLOW_UP: FollowUpState = {
   lastPetAt: 0,
   lastPetScore: null,
   pendingBubble: '',
+  lastAskDetail: '',
 }
 
 /** 本地日期 `YYYY-MM-DD`（按系统时区，不用 UTC）。 */
