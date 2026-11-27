@@ -79,7 +79,9 @@ function makeExtractionHost(ctx: Context): ExtractionHost {
         | { saveImage?: (input: Record<string, unknown>) => Promise<unknown> }
         | undefined
       if (!attachments?.saveImage) throw new Error('宿主没有可用的附件服务，无法读取图片。')
-      return attachments.saveImage({ data: base64, mediaType, name: imageName })
+      // saveImage 要 Uint8Array，不接受 base64 字符串——传错会被判 malformed。
+      const bytes = Uint8Array.from(Buffer.from(base64, 'base64'))
+      return attachments.saveImage({ data: bytes, mediaType, name: imageName })
     },
   }
 }
@@ -100,16 +102,6 @@ export function apply(ctx: Context, config: Config): void {
 
   registerTools(ctx, service)
 
-  // 兜底入口：往宿主 index 里注入一个脚本，页面左下角会出现「♥ 健康评估」。
-  // 走官方 webserver/index-inject 扩展点，不改宿主代码。
-  ctx.on('webserver/index-inject', (table: unknown) => {
-    const rows = table as { push: (row: unknown) => void }
-    rows.push({ kind: 'script-src', placement: 'head', src: `${API_PREFIX}/plugin.js` })
-    store.loadFollowUp()
-      .then((state) => store.saveFollowUp({ ...state, lastIndexInject: Date.now() }))
-      .catch(() => undefined)
-  })
-
   // webServer 是可选能力：没有它插件照常算分，只是没有面板。
   ctx.inject(['webServer'], (scope) => {
     const followUp = new FollowUpManager(scope as unknown as Context, store, service, pet)
@@ -121,10 +113,16 @@ export function apply(ctx: Context, config: Config): void {
       ackPet: () => followUp.ackPet(),
       askNow: () => followUp.askNow(),
       clientHello: (stage, error) => followUp.clientHello(stage, error),
+      autoPrompt: () => followUp.autoPrompt(),
     })
     scope.effect(() => () => {
       stop()
       disposeRoutes()
     }, 'dsh-health-assessment: routes')
+    // 打开 DSH 即自检：档案/今日必填有缺口时，在设定工作区自动开新会话追问。
+    // 去重由 followup.json 的 autoPromptDate 保证，同一天重启不会重复。
+    setTimeout(() => {
+      void followUp.autoPrompt().catch(() => undefined)
+    }, 3000)
   })
 }

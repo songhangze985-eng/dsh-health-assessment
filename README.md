@@ -143,6 +143,30 @@ python3 tools/py_batch.py in.json out.json  # 手动跑一批
 - **0.1.6**：追问再加第二通道 `sessionController.createSession + prompt`（浏览器新建会话用的同一条服务）；两条都失败才降级。
 - 装完或升级后需要**重启 DSH**；也可以先在 profile 的 `dsh.profile.bundles` 里摘掉包名、等几秒再加回来，触发一次热卸载/重挂。
 
+## 0.7.x 界面
+
+- 全高单页：顶部单行 Header（标题 / 共享日期 / 连接点 / 刷新 / 设置），下方 65/35 双栏，铺设到底无留白。
+- 输入区多模态：拖拽、附件按钮、⌘V 粘贴图片；支持 CSV / Excel / 图片；附件以胶囊显示，可删除。
+- 设置是**居中 Modal**（不是抽屉）：模型与识图引擎、自动追问与工作区、交互偏好三组，底部取消/保存，Esc 与点遮罩关闭。
+- 仪表盘：环形总分（/200）+ 身体/心理双进度条；未建档时卡片内直接给「立即补全基础档案」。
+- 14 天热力格带首中尾日期刻度、图例与悬停提示，点任意一天切换顶部日期。
+- 今日必填：已完成项显示实际值（如 `45 分钟`、`4 分`），未完成项给出补录提示并可直接点击预填。
+
+### 后端支持
+
+- `POST /checkin/image/preview` → 识图通道读图 → 文本模型结构化 → 返回草稿（不写库）
+- `POST /checkin/commit` → 确认后写入
+- `POST /checkin/table` 支持 `fileBase64`（CSV / xlsx / xls）
+- `GET /workspaces` → 宿主真实工作区列表（`workspaceController.list`，缺失时读 DSH 工作区存储）
+- `POST /followup/auto` → 打开即检测（当日去重）
+
+### 自动检测与去重
+
+- 钩子：插件 `apply()` 内 `setTimeout(..., 3000)` 调 `followUp.autoPrompt()`。
+- 去重：`followup.json` 的 `autoPromptDate`；同日重复调用直接返回「今天已经自动追问过」。
+- 会话：`agents.create` + `agent.followup`（失败回落 `sessionController.createSession` + `prompt`），标题 `健康评估补录 · YYYY-MM-DD`。
+- 当前 DSH（0.2.2-rc.5）实测该链路的 `followup` 不落盘，因此实际效果为降级到桌宠气泡 + 面板提示；DSH 修好后无需改代码即可恢复。
+
 ## 已知限制
 
 - 图片识别依赖你在设置里指定的模型具备视觉能力；宿主没有附件服务时会明确报错，而不是假装识别成功。
