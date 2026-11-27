@@ -32,7 +32,9 @@ export class PetBridge {
   /** 本机 origin；拿不到就说明 web 服务还没绑定，直接跳过。 */
   private origin(): string | null {
     try {
-      const webServer = (this.ctx as unknown as { webServer?: { getOrigin?: () => string } }).webServer
+      const webServer = (this.ctx as unknown as { get?: (name: string) => unknown }).get?.('webServer') as
+        | { getOrigin?: () => string }
+        | undefined
       return webServer?.getOrigin?.() ?? null
     } catch {
       return null

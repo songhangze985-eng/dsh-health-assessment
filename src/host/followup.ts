@@ -192,15 +192,15 @@ export class FollowUpManager {
    * 拿不到 agents 服务、或创建被拒时返回 false，由调用方退回面板提示。
    */
   private async openAskSession(text: string, workspace: string): Promise<boolean> {
-    const ctx = this.ctx as unknown as {
-      get?: (name: string) => unknown
-      agentDefaultModel?: { currentSelection?: () => { provider?: string; model?: string } }
-    }
+    const ctx = this.ctx as unknown as { get?: (name: string) => unknown }
     const agents = ctx.get?.('agents') as
       | { create?: (options: Record<string, unknown>) => Promise<{ agent?: { followup?: (input: unknown) => unknown } }> }
       | undefined
     if (!agents?.create) return false
-    const selection = ctx.agentDefaultModel?.currentSelection?.() ?? {}
+    const model = ctx.get?.('agentDefaultModel') as
+      | { currentSelection?: () => { provider?: string; model?: string } }
+      | undefined
+    const selection = model?.currentSelection?.() ?? {}
     const sessionId = randomUUID()
     try {
       const handle = await agents.create({

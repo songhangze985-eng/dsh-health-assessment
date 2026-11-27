@@ -42,13 +42,13 @@ export const Config: Schema<Config> = Schema.object({
 
 /** 把宿主里零散的服务收敛成业务层要的抽取能力。 */
 function makeExtractionHost(ctx: Context): ExtractionHost {
-  const anyCtx = ctx as unknown as {
-    get?: (name: string) => unknown
-    agentDefaultModel?: { currentSelection?: () => { provider?: string; model?: string } }
-  }
+  const anyCtx = ctx as unknown as { get?: (name: string) => unknown }
   return {
     defaultSelection: () => {
-      const selection = anyCtx.agentDefaultModel?.currentSelection?.()
+      const model = anyCtx.get?.('agentDefaultModel') as
+        | { currentSelection?: () => { provider?: string; model?: string } }
+        | undefined
+      const selection = model?.currentSelection?.()
       if (!selection?.provider || !selection.model) return undefined
       return { provider: selection.provider, model: selection.model }
     },
