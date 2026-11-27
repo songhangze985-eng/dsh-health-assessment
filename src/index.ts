@@ -110,6 +110,7 @@ export function apply(ctx: Context, config: Config): void {
       followUp: () => followUp.state(),
       ackPet: () => followUp.ackPet(),
       askNow: () => followUp.askNow(),
+      clientHello: () => followUp.clientHello(),
     })
     scope.effect(() => () => {
       stop()

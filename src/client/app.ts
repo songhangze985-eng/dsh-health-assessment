@@ -55,6 +55,34 @@ export function makeFactory(): (require: (mod: string) => unknown) => unknown {
       jsx: (type: unknown, props: unknown, key?: unknown) => unknown
     }
 
+    /** 告诉宿主「浏览器侧确实执行到这里了」，用于排查面板不出现。 */
+    function hello(): void {
+      try {
+        void fetch('/health-assessment-8221/client-hello', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        }).catch(() => undefined)
+      } catch {
+        // 心跳失败不影响面板本身。
+      }
+    }
+
+    /** 首次加载时把健康页签直接打开，避免用户以为插件没装上。 */
+    function reveal(ctx: PanelContext): void {
+      try {
+        const controller = ctx.get?.('sidebarRight') as { openTab?: (kind: string) => void } | undefined
+        if (!controller?.openTab) return
+        const key = 'dsh-health-assessment:revealed'
+        if (window.localStorage.getItem(key) === '1') return
+        window.localStorage.setItem(key, '1')
+        controller.openTab(TAB_KIND)
+      } catch {
+        // 右侧栏不可用或本地存储被禁：用户仍可在右栏「添加面板」里找到健康。
+      }
+    }
+
     /** 注册页签；返回注销函数。 */
     function registerTab(ctx: PanelContext): () => void {
       const disposers: (() => void)[] = []
@@ -75,6 +103,7 @@ export function makeFactory(): (require: (mod: string) => unknown) => unknown {
       } else {
         console.warn('[dsh-health-assessment] 右侧栏不可用：没有 sidebarRightTabs 服务，健康页签未注册')
       }
+      hello()
       ctx.slots.inject('sidebar.right.pane.tab', function* registerPane() {
         yield ctx.slots.register(
           { name: 'sidebar.right.pane.tab', key: TAB_ID, order: 520 },
@@ -93,6 +122,7 @@ export function makeFactory(): (require: (mod: string) => unknown) => unknown {
     function apply(ctx: PanelContext): void {
       injectStyles()
       const dispose = registerTab(ctx)
+      setTimeout(() => reveal(ctx), 800)
       ctx.effect?.(() => () => dispose(), 'dsh-health-assessment: sidebar tab')
     }
 

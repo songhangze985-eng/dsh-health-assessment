@@ -79,6 +79,8 @@ export interface FollowUpState {
   pendingBubble: string
   /** 最近一次追问的结论文本（成功或失败原因），便于面板与排查。 */
   lastAskDetail: string
+  /** 最近一次浏览器侧插件加载的时间戳；用来判断 client bundle 有没有执行。 */
+  lastClientHello: number
 }
 
 /** 空的追问状态。 */
@@ -91,6 +93,7 @@ export const EMPTY_FOLLOW_UP: FollowUpState = {
   lastPetScore: null,
   pendingBubble: '',
   lastAskDetail: '',
+  lastClientHello: 0,
 }
 
 /** 本地日期 `YYYY-MM-DD`（按系统时区，不用 UTC）。 */

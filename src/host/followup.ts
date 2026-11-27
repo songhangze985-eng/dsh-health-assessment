@@ -88,6 +88,13 @@ export class FollowUpManager {
     return this.store.loadFollowUp()
   }
 
+  /** 记录浏览器侧插件已加载。 */
+  async clientHello(): Promise<void> {
+    const state = await this.store.loadFollowUp()
+    state.lastClientHello = Date.now()
+    await this.store.saveFollowUp(state)
+  }
+
   /** 记录用户已回复。 */
   async markReply(): Promise<void> {
     const state = await this.store.loadFollowUp()

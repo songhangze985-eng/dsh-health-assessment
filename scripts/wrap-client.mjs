@@ -17,6 +17,9 @@ const bundlePath = join(root, 'lib', 'client.bundle.cjs')
 const outputPath = join(root, 'lib', 'client.js')
 
 const bundle = readFileSync(bundlePath, 'utf8')
+// 模块 id 必须等于 cordis.patch.yml 里的 entry id：client-modules 用 entry.id
+// 给每个组合脚本命名，bundle 注册的 id 与它对不上就会被静默跳过。
+const ENTRY_ID = 'health-assessment'
 
 const wrapped = `/* dsh-health-assessment 浏览器半侧：由 scripts/wrap-client.mjs 生成，请勿手改 */
 (function () {
@@ -35,7 +38,7 @@ ${bundle}
     return module.exports;
   })();
   loader.load({
-    id: 'dsh-health-assessment',
+    id: '${ENTRY_ID}',
     factory: function (require) {
       return bundle.makeFactory()(require);
     }

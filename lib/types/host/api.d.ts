@@ -23,6 +23,8 @@ export interface ApiHooks {
     ackPet?: () => Promise<void>;
     /** 立刻追问一次并返回诊断。 */
     askNow?: () => Promise<unknown>;
+    /** 浏览器侧插件加载后的心跳。 */
+    clientHello?: () => Promise<void>;
 }
 /**
  * 注册全部路由。
