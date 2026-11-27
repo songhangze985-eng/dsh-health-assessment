@@ -30,6 +30,14 @@ pnpm pack            # 产出 dsh-health-assessment-0.1.0.tgz
 dsh plugin --profile desktop add "file:$PWD/dsh-health-assessment-0.1.0.tgz"
 ```
 
+桌面版没有全局 `dsh` 命令时，等价做法是在 profile 目录里直接装，并把包名加进 `dsh.profile.bundles`：
+
+```bash
+cd ~/.dsh/profiles/desktop
+pnpm add "file:$PWD/dsh-health-assessment-0.1.0.tgz"
+# 然后在 package.json 的 dsh.profile.bundles 末尾追加 "dsh-health-assessment"
+```
+
 装完重启 DSH。右侧栏会出现「健康」页签；对话里模型可以调用 `health_checkin_text`、`health_import_table`、`health_score`、`health_profile`、`health_daily`。
 
 ## 数据在哪
