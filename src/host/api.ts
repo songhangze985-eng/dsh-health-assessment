@@ -7,7 +7,10 @@
  * @module dsh-health-assessment/src/host/api
  */
 
+import { existsSync, readFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -15,7 +18,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ProfileRecord } from '../core/types.js'
 import type { HealthService } from './service.js'
 import type { HealthStore } from './store.js'
-import { renderUiPage } from './ui-page.js'
+import { renderEntryScript, renderUiPage } from './ui-page.js'
 
 /** 路由前缀；带插件特征后缀，防止与生态里的同名插件冲突。 */
 export const API_PREFIX = '/health-assessment-8221'
@@ -35,8 +38,8 @@ export interface ApiHooks {
   ackPet?: () => Promise<void>
   /** 立刻追问一次并返回诊断。 */
   askNow?: () => Promise<unknown>
-  /** 浏览器侧插件加载后的心跳。 */
-  clientHello?: () => Promise<void>
+  /** 浏览器侧插件加载后的心跳；stage 区分 boot / apply，error 带错误文本。 */
+  clientHello?: (stage: string, error?: string) => Promise<void>
 }
 
 /** 读完整请求体。 */
@@ -207,8 +210,65 @@ export function registerApi(
 
   register('/followup', async () => (hooks.followUp ? hooks.followUp() : {}))
 
-  register('/client-hello', async () => {
-    await hooks.clientHello?.()
+  // 诊断：看 loader 里的 entry 与各自 client 声明能不能解析。
+  register('/debug/roster', async () => {
+    const loader = (ctx as unknown as { loader?: { entries?: () => unknown } }).loader
+    const raw = loader?.entries?.()
+    const list: unknown[] = []
+    if (raw && typeof (raw as Iterable<unknown>)[Symbol.iterator] === 'function') {
+      for (const item of raw as Iterable<unknown>) list.push(item)
+    } else if (raw && typeof raw === 'object') {
+      list.push(...Object.values(raw as Record<string, unknown>))
+    }
+    const requireHere = createRequire(import.meta.url)
+    const rows = list.map((entry) => {
+      const options = (entry as { options?: { id?: string; name?: string } }).options ?? {}
+      const name = options.name ?? ''
+      const row: Record<string, unknown> = { id: options.id ?? '', name }
+      try {
+        const pkgPath = requireHere.resolve(`${name}/package.json`)
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+          exports?: Record<string, unknown>
+          dsh?: { client?: unknown }
+        }
+        const clientExport = pkg.exports?.['./client']
+        const rel = typeof clientExport === 'string'
+          ? clientExport
+          : (clientExport as { default?: string } | undefined)?.default
+        row.pkgPath = pkgPath
+        row.dshClient = pkg.dsh?.client ?? null
+        row.clientRel = rel ?? null
+        row.clientExists = rel ? existsSync(join(dirname(pkgPath), rel)) : false
+      } catch (error) {
+        row.error = error instanceof Error ? error.message : String(error)
+      }
+      return row
+    })
+    return {
+      count: rows.length,
+      rawKind: raw === undefined ? 'undefined' : (raw as object)?.constructor?.name ?? typeof raw,
+      rows,
+    }
+  })
+
+  // 兜底入口脚本：index 注入后由页面加载。
+  disposers.push(ctx.webServer.register({
+    kind: 'prefix',
+    path: `${API_PREFIX}/plugin.js`,
+    handler: async (_req, res) => {
+      const script = renderEntryScript()
+      res.writeHead(200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': Buffer.byteLength(script),
+      })
+      res.end(script)
+    },
+  }))
+
+  register('/client-hello', async (_req, body) => {
+    const input = jsonBody(body)
+    await hooks.clientHello?.(String(input.stage ?? 'unknown'), input.error ? String(input.error) : undefined)
     return { ok: true }
   })
 

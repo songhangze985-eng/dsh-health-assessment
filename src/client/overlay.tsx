@@ -17,7 +17,7 @@ import { healthUi } from './ui-state.js'
 export function HealthLauncher(props: { wide?: boolean } = {}) {
   const [open, setOpen] = useState(healthUi.isOpen())
   useEffect(() => healthUi.subscribe(setOpen), [])
-  const wide = props.wide === true
+  void props
   return (
     <button
       type="button"
@@ -27,7 +27,7 @@ export function HealthLauncher(props: { wide?: boolean } = {}) {
       onClick={() => healthUi.toggle()}
     >
       <span className="ha-launcher-glyph" aria-hidden="true">♥</span>
-      {wide ? <span className="ha-launcher-label">健康</span> : null}
+      <span className="ha-launcher-label">健康评估</span>
     </button>
   )
 }

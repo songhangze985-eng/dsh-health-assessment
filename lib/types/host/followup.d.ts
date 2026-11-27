@@ -31,8 +31,10 @@ export declare class FollowUpManager {
     state(): Promise<FollowUpState & {
         pendingBubble: string;
     }>;
-    /** 记录浏览器侧插件已加载。 */
-    clientHello(): Promise<void>;
+    /** 记录浏览器侧插件的三段状态：加载 / 执行 / 报错。 */
+    clientHello(stage: string, error?: string): Promise<void>;
+    /** 记录一次 index 注入。 */
+    indexInjected(): Promise<void>;
     /** 记录用户已回复。 */
     markReply(): Promise<void>;
     /** 清掉待投喂气泡（客户端已投递）。 */

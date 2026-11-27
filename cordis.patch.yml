@@ -11,5 +11,5 @@
 # ============================================================================
 
 - insert:
-    - id: health-assessment
+    - id: dsh-health-assessment
       name: 'dsh-health-assessment'

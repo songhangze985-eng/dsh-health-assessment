@@ -19,7 +19,7 @@ const outputPath = join(root, 'lib', 'client.js')
 const bundle = readFileSync(bundlePath, 'utf8')
 // 模块 id 必须等于 cordis.patch.yml 里的 entry id：client-modules 用 entry.id
 // 给每个组合脚本命名，bundle 注册的 id 与它对不上就会被静默跳过。
-const ENTRY_ID = 'health-assessment'
+const ENTRY_ID = 'dsh-health-assessment'
 
 const wrapped = `/* dsh-health-assessment 浏览器半侧：由 scripts/wrap-client.mjs 生成，请勿手改 */
 (function () {
@@ -28,6 +28,15 @@ const wrapped = `/* dsh-health-assessment 浏览器半侧：由 scripts/wrap-cli
     console.warn('[dsh-health-assessment] 没有 __ModuleLoader__，面板无法加载');
     return;
   }
+  // 第一段心跳：bundle 顶层就发，证明浏览器真的下载并执行了这个文件。
+  try {
+    fetch('/health-assessment-8221/client-hello', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: 'boot' })
+    }).catch(function () {});
+  } catch (e) {}
+
   /** 模块本体：只导出 makeFactory，不含任何副作用。 */
   var bundle = (function () {
     var module = { exports: {} };
@@ -40,7 +49,26 @@ ${bundle}
   loader.load({
     id: '${ENTRY_ID}',
     factory: function (require) {
-      return bundle.makeFactory()(require);
+      var mod = bundle.makeFactory()(require);
+      var originalApply = mod.apply;
+      mod.apply = function (ctx) {
+        try {
+          originalApply(ctx);
+          fetch('/health-assessment-8221/client-hello', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: 'apply' })
+          }).catch(function () {});
+        } catch (error) {
+          fetch('/health-assessment-8221/client-hello', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: 'apply', error: String(error && error.stack || error) })
+          }).catch(function () {});
+          throw error;
+        }
+      };
+      return mod;
     }
   });
 })();

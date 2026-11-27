@@ -371,3 +371,48 @@ export function renderUiPage(): string {
 </body>
 </html>`
 }
+
+/**
+ * 兜底入口脚本：在 DSH 页面左下角放一个固定按钮，点开全屏面板。
+ *
+ * 与 client 插件的 `sidebar.footer.action` 并行：那条走 Cordis 槽位，这条只依赖
+ * 一次 index 注入，用来保证「一定有入口可见」。
+ */
+export function renderEntryScript(): string {
+  return `(function(){
+  var BTN='ha-entry', OVERLAY='ha-entry-overlay', API=${JSON.stringify(API_PREFIX)};
+  function openPanel(){
+    if (document.getElementById(OVERLAY)) return;
+    var wrap=document.createElement('div');
+    wrap.id=OVERLAY;
+    wrap.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px';
+    var frame=document.createElement('iframe');
+    frame.src=API+'/ui';
+    frame.style.cssText='width:min(1440px,96vw);height:min(920px,92vh);border:1px solid #2a2d33;border-radius:12px;background:#16171a';
+    wrap.appendChild(frame);
+    wrap.addEventListener('click',function(event){ if(event.target===wrap) wrap.remove(); });
+    document.addEventListener('keydown',function onKey(event){
+      if(event.key==='Escape'){ wrap.remove(); document.removeEventListener('keydown',onKey); }
+    });
+    document.body.appendChild(wrap);
+  }
+  function mount(){
+    if(!document.body || document.getElementById(BTN)) return;
+    var button=document.createElement('button');
+    button.id=BTN;
+    button.type='button';
+    button.textContent='♥ 健康评估';
+    button.title='打开健康评估面板';
+    button.style.cssText=[
+      'position:fixed','left:12px','bottom:14px','z-index:99999',
+      'font:13px -apple-system,"PingFang SC",sans-serif','color:#e6e7ea',
+      'background:rgba(95,124,240,.22)','border:1px solid rgba(95,124,240,.5)',
+      'border-radius:8px','padding:7px 12px','cursor:pointer','box-shadow:0 4px 14px rgba(0,0,0,.35)'
+    ].join(';');
+    button.addEventListener('click',openPanel);
+    document.body.appendChild(button);
+  }
+  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',mount); else mount();
+  try { new MutationObserver(mount).observe(document.documentElement,{childList:true,subtree:true}); } catch (e) {}
+})();`
+}

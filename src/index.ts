@@ -13,7 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 
-import { registerApi } from './host/api.js'
+import { API_PREFIX, registerApi } from './host/api.js'
 import { FollowUpManager } from './host/followup.js'
 import { PetBridge } from './host/pet.js'
 import { HealthService, type ExtractionHost } from './host/service.js'
@@ -21,7 +21,7 @@ import { HealthStore, defaultRoot } from './host/store.js'
 import { registerTools } from './host/tools.js'
 
 /** 插件行 id，必须与 `cordis.patch.yml` 里的 `id` 完全一致。 */
-export const name = 'health-assessment'
+export const name = 'dsh-health-assessment'
 
 /** 只硬依赖工具注册表；其余按可用性降级。 */
 export const inject = ['tools']
@@ -100,6 +100,16 @@ export function apply(ctx: Context, config: Config): void {
 
   registerTools(ctx, service)
 
+  // 兜底入口：往宿主 index 里注入一个脚本，页面左下角会出现「♥ 健康评估」。
+  // 走官方 webserver/index-inject 扩展点，不改宿主代码。
+  ctx.on('webserver/index-inject', (table: unknown) => {
+    const rows = table as { push: (row: unknown) => void }
+    rows.push({ kind: 'script-src', placement: 'head', src: `${API_PREFIX}/plugin.js` })
+    store.loadFollowUp()
+      .then((state) => store.saveFollowUp({ ...state, lastIndexInject: Date.now() }))
+      .catch(() => undefined)
+  })
+
   // webServer 是可选能力：没有它插件照常算分，只是没有面板。
   ctx.inject(['webServer'], (scope) => {
     const followUp = new FollowUpManager(scope as unknown as Context, store, service, pet)
@@ -110,7 +120,7 @@ export function apply(ctx: Context, config: Config): void {
       followUp: () => followUp.state(),
       ackPet: () => followUp.ackPet(),
       askNow: () => followUp.askNow(),
-      clientHello: () => followUp.clientHello(),
+      clientHello: (stage, error) => followUp.clientHello(stage, error),
     })
     scope.effect(() => () => {
       stop()

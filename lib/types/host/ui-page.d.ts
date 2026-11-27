@@ -11,3 +11,10 @@
  */
 /** 生成整页 HTML。 */
 export declare function renderUiPage(): string;
+/**
+ * 兜底入口脚本：在 DSH 页面左下角放一个固定按钮，点开全屏面板。
+ *
+ * 与 client 插件的 `sidebar.footer.action` 并行：那条走 Cordis 槽位，这条只依赖
+ * 一次 index 注入，用来保证「一定有入口可见」。
+ */
+export declare function renderEntryScript(): string;

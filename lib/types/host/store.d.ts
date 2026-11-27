@@ -51,6 +51,14 @@ export interface FollowUpState {
     lastAskDetail: string;
     /** 最近一次浏览器侧插件加载的时间戳；用来判断 client bundle 有没有执行。 */
     lastClientHello: number;
+    /** bundle 顶层执行（loader.load 之前）的时间戳：证明文件被浏览器下载并运行。 */
+    lastClientBoot: number;
+    /** apply 成功的时间戳：证明槽位注册真的跑到了。 */
+    lastClientApply: number;
+    /** client 侧最后一次报错。 */
+    lastClientError: string;
+    /** 最近一次向宿主 index 注入兜底脚本的时间戳。 */
+    lastIndexInject: number;
 }
 /** 空的追问状态。 */
 export declare const EMPTY_FOLLOW_UP: FollowUpState;

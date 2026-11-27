@@ -88,10 +88,21 @@ export class FollowUpManager {
     return this.store.loadFollowUp()
   }
 
-  /** 记录浏览器侧插件已加载。 */
-  async clientHello(): Promise<void> {
+  /** 记录浏览器侧插件的三段状态：加载 / 执行 / 报错。 */
+  async clientHello(stage: string, error?: string): Promise<void> {
     const state = await this.store.loadFollowUp()
-    state.lastClientHello = Date.now()
+    const now = Date.now()
+    state.lastClientHello = now
+    if (stage === 'boot') state.lastClientBoot = now
+    if (stage === 'apply') state.lastClientApply = now
+    if (error) state.lastClientError = error.slice(0, 500)
+    await this.store.saveFollowUp(state)
+  }
+
+  /** 记录一次 index 注入。 */
+  async indexInjected(): Promise<void> {
+    const state = await this.store.loadFollowUp()
+    state.lastIndexInject = Date.now()
     await this.store.saveFollowUp(state)
   }
 
