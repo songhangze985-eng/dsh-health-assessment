@@ -168,6 +168,75 @@ const CSS = `
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+.ha-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 6px 8px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  opacity: 0.75;
+}
+.ha-launcher:hover,
+.ha-launcher[data-active='true'] {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.16);
+}
+.ha-launcher-glyph {
+  font-size: 15px;
+  line-height: 1;
+  color: #e0574f;
+}
+.ha-launcher-label {
+  font-size: 12px;
+}
+.ha-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+.ha-overlay-card {
+  width: min(980px, 92vw);
+  height: min(760px, 88vh);
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  background: var(--dsh-bg, #1b1b1d);
+  color: var(--dsh-text, #e6e6e6);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.ha-overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+}
+.ha-overlay-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.ha-overlay-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.ha-overlay-body > .ha-panel {
+  flex: 1;
+}
 `
 
 /** 注入样式（幂等）。 */

@@ -7,6 +7,7 @@
  * @module dsh-health-assessment/src/client/app
  */
 
+import { HealthLauncher, HealthOverlay } from './overlay.js'
 import { HealthPanel } from './panel.js'
 import { injectStyles } from './styles.js'
 
@@ -38,7 +39,10 @@ interface PanelContext {
   get?: (name: string) => unknown
   slots: {
     inject(name: string, generator: () => Generator<unknown, void, unknown>): void
-    register(registration: { name: string; key: string; order: number }, component: () => unknown): () => void
+    register(
+      registration: { name: string; key?: string; id?: string; order?: number; label?: () => string },
+      component: (props?: Record<string, unknown>) => unknown,
+    ): () => void
   }
   effect?: (fn: () => () => void, label?: string) => void
 }
@@ -108,6 +112,20 @@ export function makeFactory(): (require: (mod: string) => unknown) => unknown {
         yield ctx.slots.register(
           { name: 'sidebar.right.pane.tab', key: TAB_ID, order: 520 },
           () => runtime.jsx(HealthPanel, {}),
+        )
+      })
+      // 左侧栏入口：与其他侧栏动作并列，点开独立界面。
+      ctx.slots.inject('sidebar.footer.action', function* registerLauncher() {
+        yield ctx.slots.register(
+          { name: 'sidebar.footer.action', id: 'health-assessment', order: 600 },
+          (props?: Record<string, unknown>) => runtime.jsx(HealthLauncher, { wide: props?.wide === true }),
+        )
+      })
+      // 独立界面：全屏层，不占对话区。
+      ctx.slots.inject('shell.overlay', function* registerOverlay() {
+        yield ctx.slots.register(
+          { name: 'shell.overlay', id: 'health-assessment', order: 900 },
+          () => runtime.jsx(HealthOverlay, {}),
         )
       })
       return () => {
