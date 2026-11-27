@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ProfileRecord } from '../core/types.js'
 import type { HealthService } from './service.js'
 import type { HealthStore } from './store.js'
+import { renderUiPage } from './ui-page.js'
 
 /** 路由前缀；带插件特征后缀，防止与生态里的同名插件冲突。 */
 export const API_PREFIX = '/health-assessment-8221'
@@ -114,7 +115,22 @@ export function registerApi(
     }))
   }
 
-  register('/', async () => ({ ok: true, prefix: API_PREFIX }))
+  register('/', async () => ({ ok: true, prefix: API_PREFIX, ui: `${API_PREFIX}/ui` }))
+
+  // 独立界面：宿主直接吐一页自包含 HTML，不依赖 DSH 的浏览器插件加载链。
+  disposers.push(ctx.webServer.register({
+    kind: 'prefix',
+    path: `${API_PREFIX}/ui`,
+    handler: async (_req, res) => {
+      const html = renderUiPage()
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': Buffer.byteLength(html),
+      })
+      res.end(html)
+    },
+  }))
 
   register('/overview', async () => service.overview())
 
