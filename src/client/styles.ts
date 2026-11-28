@@ -21,6 +21,12 @@ const CSS = `
   color: inherit; padding: 5px 8px; font: inherit; font-size: 12px; color-scheme: dark;
 }
 .ha-grow { flex: 1; }
+.ha-switch { display: flex; gap: 2px; background: #1c1e22; border-radius: 8px; padding: 2px; }
+.ha-switch button {
+  border: 0; background: transparent; color: #9aa0a8; padding: 5px 10px;
+  border-radius: 6px; cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap;
+}
+.ha-switch button[data-active='true'] { background: #2a2d33; color: #e7e8ea; }
 .ha-dot { width: 7px; height: 7px; border-radius: 50%; background: #6b7078; flex: 0 0 auto; }
 .ha-dot.ok { background: #4faa80; }
 .ha-icon {
@@ -185,6 +191,54 @@ const CSS = `
   font-size: 11px; line-height: 1.5; max-height: 260px; overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #c9ced6;
 }
+
+.ha-modal-wide { width: min(640px, 94vw); }
+.ha-mini {
+  font-size: 11px; padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  color: #c9ced6; font: inherit; font-size: 11px;
+}
+.ha-mini:hover { background: rgba(255,255,255,.12); color: #fff; }
+.ha-row.gap8 { gap: 8px; display: inline-flex; align-items: center; }
+.ha-error-text { margin: 0; color: #e08b8b; font-size: 12px; }
+
+/* 选填手风琴 */
+.ha-acc { border-radius: 9px; background: #1f2226; overflow: hidden; }
+.ha-acc-head {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px;
+  background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.ha-acc-head:hover { background: rgba(255,255,255,.04); }
+.ha-acc-head .ha-muted { margin-left: auto; }
+.ha-acc-caret { display: inline-block; transition: transform .15s; color: #7f858d; }
+.ha-acc-caret.open { transform: rotate(90deg); }
+.ha-acc-body { padding: 4px 12px 10px; display: flex; flex-direction: column; gap: 4px; }
+.ha-opt-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.ha-opt-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #c9ced6; }
+.ha-levels { display: inline-flex; gap: 3px; flex: 0 0 auto; }
+.ha-level {
+  width: 24px; height: 24px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px;
+  background: #262a30; border: 1px solid rgba(255,255,255,.06); color: #9aa0a8;
+}
+.ha-level:hover { background: #2e333a; color: #fff; }
+.ha-level[data-active='true'] { background: #3757c9; border-color: #4a6ae0; color: #fff; }
+.ha-opt-hours { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.ha-input-inline { width: 84px; padding: 4px 8px; }
+
+/* 明细 */
+.ha-parts { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,.06); }
+.ha-parts-row { display: flex; align-items: center; gap: 8px; }
+.ha-parts-label { flex: 0 0 auto; width: 64px; color: #9aa0a8; font-size: 12px; white-space: nowrap; }
+.ha-parts-num { flex: 0 0 auto; width: 42px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ha-parts-sub { color: #7f858d; font-size: 11px; }
+
+/* 历史行可点 */
+.ha-hrow-btn { width: 100%; background: transparent; border: 0; border-bottom: 1px solid rgba(255,255,255,.05); color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.ha-hrow-btn:hover { background: rgba(255,255,255,.04); }
+.ha-hrow-btn:last-child { border-bottom: 0; }
+.ha-detail { display: flex; flex-direction: column; gap: 2px; }
+.ha-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,.05); }
+.ha-kv:last-child { border-bottom: 0; }
 
 @media (max-width: 980px) {
   .ha-main { grid-template-columns: 1fr; grid-template-rows: auto auto; }

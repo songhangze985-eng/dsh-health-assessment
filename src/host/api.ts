@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
+import { OPTIONAL_GROUPS, OPTIONAL_HINTS } from '../core/optional-catalog.js'
 import type { ProfileRecord } from '../core/types.js'
 import type { HealthService } from './service.js'
 import type { HealthStore } from './store.js'
@@ -261,6 +262,132 @@ export function registerApi(
   })
 
   register('/followup/auto', async () => (hooks.autoPrompt ? hooks.autoPrompt() : { ok: false, detail: '未接线' }))
+
+  // 选填：58 项目录 + 写入
+  register('/optional/catalog', async () => ({ groups: OPTIONAL_GROUPS, hints: OPTIONAL_HINTS }))
+
+  register('/checkin/optional', async (_req, body) => {
+    const input = jsonBody(body)
+    const date = String(input.date ?? '')
+    if (!date) throw new Error('缺少日期。')
+    const items = (input.items ?? {}) as Record<string, unknown>
+    const session = await service.submitOptional({ date, items })
+    return { session, daily: await service.daily(date) }
+  })
+
+  // 红旗专用：只记日期与红旗
+  register('/checkin/flag-only', async (_req, body) => {
+    const input = jsonBody(body)
+    const session = await service.submitFlagOnly({
+      date: String(input.date ?? ''),
+      flags: Array.isArray(input.flags) ? (input.flags as string[]) : [],
+    })
+    return { session }
+  })
+
+  // 单日记录：读 / 改 / 删
+  register('/session', async (req, body) => {
+    const params = query(req)
+    const date = params.get('date') ?? ''
+    if (req.method === 'DELETE') {
+      if (!date) throw new Error('缺少日期。')
+      const removed = await service.deleteDay(date)
+      return { removed, daily: await service.daily(date) }
+    }
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (!date) throw new Error('缺少日期。')
+      return { session: await service.readDay(date) }
+    }
+    const input = jsonBody(body)
+    const target = String(input.date ?? date)
+    if (!target) throw new Error('缺少日期。')
+    const patch: Record<string, unknown> = { date: target }
+    for (const field of ['body_required', 'psych_required', 'optional', 'red_flags']) {
+      if (input[field] !== undefined) patch[field] = input[field]
+    }
+    const session = await service.commitSession(patch as never, 'manual_form')
+    return { session, daily: await service.daily(target) }
+  })
+
+  // 自定义计分标准
+  register('/targets', async (req, body) => {
+    if (req.method === 'GET' || req.method === 'HEAD') return service.targets()
+    const input = jsonBody(body)
+    return service.saveTargets({
+      protein_g_per_kg: Number(input.protein_g_per_kg),
+      resistance_sessions_per_7d: Number(input.resistance_sessions_per_7d),
+      confirm: input.confirm === true,
+    })
+  })
+
+  register('/log', async () => ({ rows: await service.standardLog() }))
+
+  register('/analyses', async (req) => {
+    const name = query(req).get('name')
+    if (name) return { name, payload: await service.readAnalysis(name) }
+    return service.analyses()
+  })
+
+  // 导出
+  register('/export', async (req) => {
+    const format = query(req).get('format') === 'csv' ? 'csv' : 'json'
+    const result = await service.exportAll(format)
+    return { ...result, encoding: 'utf8' }
+  })
+
+  // 真实模型目录
+  register('/models', async () => {
+    const llm = (ctx as unknown as { get?: (name: string) => unknown }).get?.('llm') as
+      | {
+          listProviders?: () => { id?: string; name?: string }[]
+          listModels?: (provider: string) => Promise<{ id?: string; name?: string }[]>
+        }
+      | undefined
+    if (!llm?.listProviders) return { providers: [], detail: '宿主没有 llm 服务' }
+    try {
+      const raw = llm.listProviders() ?? []
+      const providers = []
+      for (const provider of raw) {
+        const id = String(provider.id ?? provider.name ?? '')
+        if (!id) continue
+        let models: { id: string; name: string }[] = []
+        if (llm.listModels) {
+          try {
+            const list = await llm.listModels(id)
+            models = (list ?? [])
+              .map((model) => ({ id: String(model.id ?? model.name ?? ''), name: String(model.name ?? model.id ?? '') }))
+              .filter((model) => model.id)
+          } catch {
+            models = []
+          }
+        }
+        providers.push({ id, name: String(provider.name ?? id), models })
+      }
+      return { providers, detail: 'ok' }
+    } catch (error) {
+      return { providers: [], detail: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  // 记忆库：列表 / 新增 / 切换
+  register('/libraries', async (req, body) => {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const settings = await service.settings(true)
+      return { libraries: settings.libraries ?? [], active: settings.activeLibrary || '', root: store.root }
+    }
+    const input = jsonBody(body)
+    const path = String(input.path ?? '').trim()
+    if (!path) throw new Error('请给出记忆库绝对路径。')
+    const settings = await service.settings(true)
+    const libraries = [...(settings.libraries ?? [])]
+    if (!libraries.some((item) => item.path === path)) {
+      libraries.push({ path, codename: String(input.codename ?? path.split('/').pop() ?? '') })
+    }
+    const active = input.switch === true ? path : settings.activeLibrary
+    const next = await service.saveSettings({ libraries, activeLibrary: active })
+    if (input.switch === true) store.switchTo(path)
+    return { libraries: next.libraries, active: next.activeLibrary, root: store.root }
+  })
 
   register('/settings', async (req, body) => {
     if (req.method === 'GET' || req.method === 'HEAD') return service.settings(true)

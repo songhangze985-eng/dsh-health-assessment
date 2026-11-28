@@ -34,6 +34,17 @@ export interface HealthSettings {
     petEnabled: boolean;
     /** 图片发送给模型前是否需要确认。 */
     confirmImageUpload: boolean;
+    /** 已知记忆库列表；一个路径 = 一个人。 */
+    libraries: LibraryEntry[];
+    /** 当前生效的记忆库路径；空表示用默认目录。 */
+    activeLibrary: string;
+}
+/** 一个记忆库条目。 */
+export interface LibraryEntry {
+    /** 绝对路径。 */
+    path: string;
+    /** 代号（同一个人以后不再问）。 */
+    codename: string;
 }
 /** 默认设置：追问开、不排定时、5 小时升级、宠物开。 */
 export declare const DEFAULT_SETTINGS: HealthSettings;
@@ -88,9 +99,11 @@ export declare function defaultRoot(): string;
  * 一个实例只服务一个目录；目录在构造时确定，运行中不再切换（单人单库）。
  */
 export declare class HealthStore {
-    /** 记忆库根目录。 */
-    readonly root: string;
+    /** 记忆库根目录；切换库时会变。 */
+    root: string;
     constructor(root?: string);
+    /** 切到另一个记忆库目录（一个路径 = 一个人）。 */
+    switchTo(root: string): void;
     private get sessionsDir();
     private get analysesDir();
     private get settingsPath();
@@ -107,8 +120,30 @@ export declare class HealthStore {
     loadSessions(): Promise<SessionRecord[]>;
     /** 合并并保存一条记录；返回合并结果。 */
     mergeAndSaveSession(incoming: SessionRecord, sourceType?: SourceType): Promise<SessionRecord>;
+    /**
+     * 整体覆盖写一条记录（不合并）。
+     *
+     * `mergeAndSaveSession` 会跳过 null 值，因此「清除某一项」必须走这里：
+     * 由调用方自己算好最终形态，再原样落盘。
+     */
+    writeSession(day: string, session: SessionRecord): Promise<SessionRecord>;
     /** 写一份评估快照。 */
     writeAnalysis(day: string, payload: unknown): Promise<void>;
+    /**
+     * 删除某一天的全部记录文件。
+     *
+     * 只删 `sessions/<day>.json` 与同日期的来源文件；不碰其他日期。
+     * @returns 实际删除的文件名。
+     */
+    deleteSession(day: string): Promise<string[]>;
+    /** 列出评估快照文件名（新到旧）。 */
+    listAnalyses(): Promise<string[]>;
+    /** 读一份评估快照。 */
+    readAnalysis(name: string): Promise<unknown | null>;
+    /** 追加一行自定义标准审计日志（`settings/log.jsonl`）。 */
+    appendStandardLog(entry: Record<string, unknown>): Promise<void>;
+    /** 读自定义标准审计日志。 */
+    readStandardLog(): Promise<Record<string, unknown>[]>;
     /** 读设置；缺字段用默认值补齐。 */
     loadSettings(): Promise<HealthSettings>;
     /** 写设置。 */
