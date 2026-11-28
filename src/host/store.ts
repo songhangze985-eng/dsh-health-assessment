@@ -53,6 +53,18 @@ export interface HealthSettings {
   petEnabled: boolean
   /** 图片发送给模型前是否需要确认。 */
   confirmImageUpload: boolean
+  /** 已知记忆库列表；一个路径 = 一个人。 */
+  libraries: LibraryEntry[]
+  /** 当前生效的记忆库路径；空表示用默认目录。 */
+  activeLibrary: string
+}
+
+/** 一个记忆库条目。 */
+export interface LibraryEntry {
+  /** 绝对路径。 */
+  path: string
+  /** 代号（同一个人以后不再问）。 */
+  codename: string
 }
 
 /** 默认设置：追问开、不排定时、5 小时升级、宠物开。 */
@@ -68,6 +80,8 @@ export const DEFAULT_SETTINGS: HealthSettings = {
   autoPromptOnOpen: true,
   petEnabled: true,
   confirmImageUpload: true,
+  libraries: [],
+  activeLibrary: '',
 }
 
 /** 追问状态：用于「每天一次」与「5 小时未回复升级」。 */
@@ -229,10 +243,15 @@ export function defaultRoot(): string {
  * 一个实例只服务一个目录；目录在构造时确定，运行中不再切换（单人单库）。
  */
 export class HealthStore {
-  /** 记忆库根目录。 */
-  readonly root: string
+  /** 记忆库根目录；切换库时会变。 */
+  root: string
 
   constructor(root: string = defaultRoot()) {
+    this.root = resolve(root)
+  }
+
+  /** 切到另一个记忆库目录（一个路径 = 一个人）。 */
+  switchTo(root: string): void {
     this.root = resolve(root)
   }
 
@@ -352,12 +371,98 @@ export class HealthStore {
     return merged
   }
 
+  /**
+   * 整体覆盖写一条记录（不合并）。
+   *
+   * `mergeAndSaveSession` 会跳过 null 值，因此「清除某一项」必须走这里：
+   * 由调用方自己算好最终形态，再原样落盘。
+   */
+  async writeSession(day: string, session: SessionRecord): Promise<SessionRecord> {
+    await this.ensure()
+    const safeDay = requireSessionDay(day)
+    const payload: SessionRecord = { ...session, date: safeDay }
+    await atomicWrite(join(this.sessionsDir, `${safeDay}.json`), JSON.stringify(payload, null, 2))
+    return payload
+  }
+
   /** 写一份评估快照。 */
   async writeAnalysis(day: string, payload: unknown): Promise<void> {
     await this.ensure()
     const safeDay = requireSessionDay(day)
     const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '')
     await atomicWrite(join(this.analysesDir, `${safeDay}-${stamp}.json`), JSON.stringify(payload, null, 2))
+  }
+
+  /**
+   * 删除某一天的全部记录文件。
+   *
+   * 只删 `sessions/<day>.json` 与同日期的来源文件；不碰其他日期。
+   * @returns 实际删除的文件名。
+   */
+  async deleteSession(day: string): Promise<string[]> {
+    const safeDay = requireSessionDay(day)
+    let names: string[]
+    try {
+      names = await readdir(this.sessionsDir)
+    } catch {
+      return []
+    }
+    const removed: string[] = []
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const target = join(this.sessionsDir, name)
+      // 主文件按日期命名；来源文件形如 `2026-11-28.ocr.json`。
+      if (name === `${safeDay}.json` || name.startsWith(`${safeDay}.`)) {
+        await rm(target, { force: true })
+        removed.push(name)
+      }
+    }
+    return removed
+  }
+
+  /** 列出评估快照文件名（新到旧）。 */
+  async listAnalyses(): Promise<string[]> {
+    try {
+      const names = await readdir(this.analysesDir)
+      return names.filter((name) => name.endsWith('.json')).sort().reverse()
+    } catch {
+      return []
+    }
+  }
+
+  /** 读一份评估快照。 */
+  async readAnalysis(name: string): Promise<unknown | null> {
+    const safe = name.replace(/[^0-9A-Za-z._-]/g, '')
+    if (!safe.endsWith('.json')) return null
+    try {
+      return JSON.parse(await readFile(join(this.analysesDir, safe), 'utf8'))
+    } catch {
+      return null
+    }
+  }
+
+  /** 追加一行自定义标准审计日志（`settings/log.jsonl`）。 */
+  async appendStandardLog(entry: Record<string, unknown>): Promise<void> {
+    const dir = join(this.root, 'settings')
+    await mkdir(dir, { recursive: true })
+    const line = `${JSON.stringify(entry)}\n`
+    const path = join(dir, 'log.jsonl')
+    try {
+      const previous = await readFile(path, 'utf8')
+      await atomicWrite(path, previous + line)
+    } catch {
+      await atomicWrite(path, line)
+    }
+  }
+
+  /** 读自定义标准审计日志。 */
+  async readStandardLog(): Promise<Record<string, unknown>[]> {
+    try {
+      const text = await readFile(join(this.root, 'settings', 'log.jsonl'), 'utf8')
+      return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
+    } catch {
+      return []
+    }
   }
 
   /** 读设置；缺字段用默认值补齐。 */

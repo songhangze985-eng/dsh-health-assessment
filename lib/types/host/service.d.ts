@@ -87,7 +87,13 @@ export declare class HealthService {
             label: string;
             hint: string;
             done: boolean;
+            value: string;
         }[];
+        optional: {
+            written: Record<string, unknown>;
+            bodyCount: number;
+            psychCount: number;
+        };
         score: ScoreResult;
         distinctDates: number;
         redFlags: string[];
@@ -168,6 +174,62 @@ export declare class HealthService {
         session: SessionRecord;
         source: ExtractionSource;
         warning: string;
+    }>;
+    /**
+     * 写选填项。
+     *
+     * 只合并 `optional` 字段，不碰必填与红旗；键必须是 58 项之一，
+     * 值支持 1–5、`{ hours }`、或 null（显式清除）。
+     */
+    submitOptional(input: {
+        date: string;
+        items: Record<string, unknown>;
+    }): Promise<SessionRecord>;
+    /** 读某一天的完整记录（含 optional）。 */
+    readDay(date: string): Promise<SessionRecord | null>;
+    /** 删除某一天的记录。 */
+    deleteDay(date: string): Promise<string[]>;
+    /** 红旗专用：只记日期与红旗，不写训练与营养（上游 06-red-flag 要求）。 */
+    submitFlagOnly(input: {
+        date: string;
+        flags: string[];
+    }): Promise<SessionRecord>;
+    /** 读自定义计分标准。 */
+    targets(): Promise<{
+        protein_g_per_kg: number;
+        resistance_sessions_per_7d: number;
+        source: string;
+        targetProteinG: number | null;
+    }>;
+    /**
+     * 写自定义计分标准。
+     *
+     * 超出文献范围（蛋白 1.4–2.0 克/公斤、抗阻 ≥2 次/周）时**不拒绝保存**，
+     * 但写一行 `settings/log.jsonl` 审计，与上游 `custom-standard.md` 一致。
+     */
+    saveTargets(input: {
+        protein_g_per_kg: number;
+        resistance_sessions_per_7d: number;
+        confirm?: boolean;
+    }): Promise<{
+        saved: boolean;
+        outOfRange: boolean;
+        range: string;
+        log: Record<string, unknown> | null;
+    }>;
+    /** 读评估快照列表与自定义标准日志。 */
+    analyses(): Promise<{
+        files: string[];
+    }>;
+    /** 读一份快照。 */
+    readAnalysis(name: string): Promise<unknown | null>;
+    /** 读自定义标准审计日志。 */
+    standardLog(): Promise<Record<string, unknown>[]>;
+    /** 导出原始记录与当前评分。 */
+    exportAll(format: 'json' | 'csv'): Promise<{
+        body: string;
+        contentType: string;
+        filename: string;
     }>;
     /** 从旧记忆库导入。 */
     importLibrary(sourceRoot: string): Promise<{

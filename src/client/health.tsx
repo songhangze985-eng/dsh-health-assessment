@@ -9,6 +9,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { OptionalDialog } from './optional.js'
+
 const PREFIX = '/health-assessment-8221'
 
 /* ------------------------------------------------------------------ 图标 */
@@ -46,6 +48,7 @@ interface Overview {
   profileMissing: string[]
   checklist: ChecklistItem[]
   daily: { required_completion_ratio: number }
+  optional: { written: Record<string, unknown>; bodyCount: number; psychCount: number }
   score: {
     mode: string
     label?: string
@@ -161,6 +164,22 @@ export function HealthView() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [profile, setProfile] = useState<Record<string, string>>({})
 
+  const [view, setView] = useState<'main' | 'history'>('main')
+  const [csvText, setCsvText] = useState('')
+  const [optionalOpen, setOptionalOpen] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailDate, setDetailDate] = useState('')
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
+  const [showParts, setShowParts] = useState(false)
+  const [targets, setTargets] = useState<{ protein_g_per_kg: number; resistance_sessions_per_7d: number; targetProteinG: number | null } | null>(null)
+  const [modelCatalog, setModelCatalog] = useState<{ id: string; name: string; models: { id: string; name: string }[] }[]>([])
+  const [libraries, setLibraries] = useState<{ path: string; codename: string }[]>([])
+  const [activeLibrary, setActiveLibrary] = useState('')
+  const [logRows, setLogRows] = useState<Record<string, unknown>[]>([])
+  const [diag, setDiag] = useState('')
+  const [newLibrary, setNewLibrary] = useState('')
+  const [importPath, setImportPath] = useState('')
+
   const [confirming, setConfirming] = useState<{
     kind: 'image' | 'table'
     draft?: Record<string, unknown>
@@ -196,14 +215,15 @@ export function HealthView() {
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
-    if (!settingsOpen && !profileOpen && !confirming) return
+    if (!settingsOpen && !profileOpen && !confirming && !optionalOpen && !detailOpen) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       setSettingsOpen(false); setProfileOpen(false); setConfirming(null)
+      setOptionalOpen(false); setDetailOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [settingsOpen, profileOpen, confirming])
+  }, [settingsOpen, profileOpen, confirming, optionalOpen, detailOpen])
 
   const flash = (message: string): void => {
     setNotice(message)
@@ -307,6 +327,23 @@ export function HealthView() {
 
   const openSettings = async (): Promise<void> => {
     setSettingsOpen(true)
+    void (async () => {
+      try {
+        const [t, m, l, g] = await Promise.all([
+          request<{ protein_g_per_kg: number; resistance_sessions_per_7d: number; targetProteinG: number | null }>('/targets'),
+          request<{ providers: { id: string; name: string; models: { id: string; name: string }[] }[] }>('/models'),
+          request<{ libraries: { path: string; codename: string }[]; active: string }>('/libraries'),
+          request<{ rows: Record<string, unknown>[] }>('/log'),
+        ])
+        setTargets(t)
+        setModelCatalog(m.providers ?? [])
+        setLibraries(l.libraries ?? [])
+        setActiveLibrary(l.active ?? '')
+        setLogRows(g.rows ?? [])
+      } catch {
+        // 诊断信息缺失不影响设置本身。
+      }
+    })()
     try {
       const result = await request<{ rows: { id?: string; path?: string; name?: string; title?: string }[] }>('/workspaces')
       setWorkspaces((result.rows || []).map((row) => ({
@@ -369,6 +406,158 @@ export function HealthView() {
     }
   }
 
+  /* ---- 红旗专用 / 导出 / 诊断 ---- */
+
+  const flagOnly = async (): Promise<void> => {
+    const flags = overview?.redFlags ?? []
+    if (flags.length === 0) return
+    setBusy(true)
+    try {
+      await request('/checkin/flag-only', {
+        method: 'POST',
+        body: JSON.stringify({ date, flags }),
+      })
+      flash('已只记录这一天的红旗')
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const importCsv = async (): Promise<void> => {
+    if (!csvText.trim() || busy) return
+    setBusy(true)
+    try {
+      const result = await request<{ imported: number }>('/checkin/table', {
+        method: 'POST',
+        body: JSON.stringify({ csv: csvText, date }),
+      })
+      setCsvText('')
+      flash(`已导入 ${result.imported} 天`)
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const download = async (format: 'csv' | 'json'): Promise<void> => {
+    try {
+      const result = await request<{ body: string; filename: string }>(`/export?format=${format}`)
+      const blob = new Blob([result.body], { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = result.filename
+      anchor.click()
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const runDiagnostic = async (path: string, label: string): Promise<void> => {
+    setDiag(`${label}…`)
+    try {
+      const result = await request<Record<string, unknown>>(path, { method: 'POST', body: '{}' })
+      setDiag(`${label}：${JSON.stringify(result.detail ?? result).slice(0, 220)}`)
+    } catch (cause) {
+      setDiag(`${label}失败：${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+
+  const saveTargets = async (perKg: number, per7d: number, confirm: boolean): Promise<boolean> => {
+    try {
+      const result = await request<{ saved: boolean; outOfRange: boolean; range: string }>('/targets', {
+        method: 'POST',
+        body: JSON.stringify({ protein_g_per_kg: perKg, resistance_sessions_per_7d: per7d, confirm }),
+      })
+      if (!result.saved) {
+        flash(result.range)
+        return false
+      }
+      flash('计分标准已保存')
+      await load()
+      return true
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return false
+    }
+  }
+
+  /* ---- 记忆库 ---- */
+
+  const switchLibrary = async (path: string): Promise<void> => {
+    try {
+      const result = await request<{ libraries: { path: string; codename: string }[]; active: string }>('/libraries', {
+        method: 'POST',
+        body: JSON.stringify({ path: path || '', switch: true }),
+      })
+      setLibraries(result.libraries ?? [])
+      setActiveLibrary(result.active ?? '')
+      flash(path ? `已切到 ${path}` : '已切回默认库')
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const addLibrary = async (): Promise<void> => {
+    const path = newLibrary.trim()
+    if (!path) return
+    await switchLibrary(path)
+    setNewLibrary('')
+  }
+
+  const runImport = async (): Promise<void> => {
+    const path = importPath.trim()
+    if (!path) return
+    setBusy(true)
+    try {
+      const result = await request<{ imported: number; skipped: number }>('/import', {
+        method: 'POST',
+        body: JSON.stringify({ sourceRoot: path }),
+      })
+      flash(`导入 ${result.imported} 个文件，跳过 ${result.skipped} 个`)
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ---- 单日详情 ---- */
+
+  const openDetail = async (day: string): Promise<void> => {
+    setDetailDate(day)
+    setDetailOpen(true)
+    try {
+      const result = await request<{ session: Record<string, unknown> | null }>(`/session?date=${day}`)
+      setDetail(result.session)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const deleteDay = async (): Promise<void> => {
+    if (!detailDate) return
+    setBusy(true)
+    try {
+      await request(`/session?date=${detailDate}`, { method: 'DELETE' })
+      setDetailOpen(false)
+      flash(`已删除 ${detailDate}`)
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /* ---- 派生数据 ---- */
 
   const checklist = overview?.checklist ?? []
@@ -409,6 +598,10 @@ export function HealthView() {
         <span className="ha-title">健康评估</span>
         <input className="ha-date" type="date" value={date} max={localToday()}
           onChange={(e) => setDate(e.target.value || localToday())} />
+        <div className="ha-switch">
+          <button data-active={view === 'main'} onClick={() => setView('main')}>打卡与评估</button>
+          <button data-active={view === 'history'} onClick={() => setView('history')}>历史与导入</button>
+        </div>
         <span className="ha-grow" />
         <span className={`ha-dot${connected ? ' ok' : ''}`} title={connected ? '已连接' : '未连接'} />
         <button className="ha-icon" title="刷新数据" onClick={() => void load()}>
@@ -420,6 +613,7 @@ export function HealthView() {
       {error ? <div className="ha-banner err">{error}</div> : null}
       {notice ? <div className="ha-banner ok">{notice}</div> : null}
 
+      {view === 'main' ? (
       <div className="ha-main">
         {/* 左：输入 + 清单 */}
         <section className="ha-col ha-col-left">
@@ -475,7 +669,12 @@ export function HealthView() {
           <div className="ha-block ha-block-grow">
             <div className="ha-block-head">
               <span>今天的必填</span>
-              <span className="ha-muted">{doneCount}/{checklist.length} 已完成</span>
+              <span className="ha-row gap8">
+                <span className="ha-muted">{doneCount}/{checklist.length} 已完成</span>
+                <button className="ha-mini" onClick={() => setOptionalOpen(true)}>
+                  选填 {overview ? overview.optional.bodyCount + overview.optional.psychCount : 0}/58
+                </button>
+              </span>
             </div>
             <div className="ha-progress"><i style={{ width: `${ratio * 100}%` }} /></div>
             <div className="ha-list">
@@ -529,6 +728,15 @@ export function HealthView() {
               </div>
             </div>
             <p className="ha-status">{modeText(overview)}</p>
+            <div className="ha-row gap8">
+              <button className="ha-mini" onClick={() => setShowParts((v) => !v)}>
+                {showParts ? '收起明细' : '查看明细'}
+              </button>
+              {overview && overview.redFlags.length > 0 ? (
+                <button className="ha-mini" onClick={() => void flagOnly()}>只记这一天（仅红旗）</button>
+              ) : null}
+            </div>
+            {showParts ? <PartsBreakdown overview={overview} /> : null}
             {overview && overview.profileMissing.length > 0 ? (
               <button className="ha-primary ha-profile-cta" onClick={openProfile}>
                 <Icon path={ICON.user} size={14} /> 立即补全基础档案
@@ -560,6 +768,60 @@ export function HealthView() {
           </div>
         </section>
       </div>
+      ) : (
+      <div className="ha-main">
+        <section className="ha-col ha-col-left">
+          <div className="ha-block ha-block-grow">
+            <div className="ha-block-head"><span>导入表格</span><span className="ha-muted">CSV 粘贴或选择文件</span></div>
+            <textarea
+              className="ha-textarea"
+              placeholder={'日期,蛋白质(g),无氧训练(分钟),执行力自评,评价分类\n2026-11-28,140,45,5,kept_and_changed'}
+              value={csvText}
+              onChange={(e) => setCsvText(e.target.value)}
+            />
+            <div className="ha-actions">
+              <button className="ha-primary" disabled={busy || !csvText.trim()} onClick={() => void importCsv()}>导入 CSV</button>
+              <span className="ha-muted">也可以直接拖文件到「打卡与评估」的输入区</span>
+            </div>
+          </div>
+        </section>
+        <section className="ha-col ha-col-right">
+          <div className="ha-block ha-block-grow">
+            <div className="ha-block-head">
+              <span>最近记录</span>
+              <span className="ha-row gap8">
+                <span className="ha-muted">{sessions.length} 天</span>
+                <button className="ha-mini" onClick={() => void download('csv')}>导出 CSV</button>
+                <button className="ha-mini" onClick={() => void download('json')}>导出 JSON</button>
+              </span>
+            </div>
+            <div className="ha-history">
+              {sessions.slice(0, 60).map((session) => {
+                const body = session.body_required ?? {}
+                const psych = session.psych_required ?? {}
+                const tags: string[] = []
+                if (body.protein_g !== undefined && body.protein_g !== null) tags.push('蛋白质')
+                if (body.resistance_done === true) tags.push('抗阻')
+                if (body.progressive_overload === true) tags.push('超负荷')
+                if (psych.self_rating_1_to_5 !== undefined || psych.execution_likert !== undefined) tags.push('自评')
+                if (psych.classification || psych.feedback_category) tags.push('评价处理')
+                return (
+                  <button className="ha-hrow ha-hrow-btn" key={session.date} onClick={() => void openDetail(session.date)}>
+                    <span className="ha-mono">{session.date}</span>
+                    <span className="ha-tags">
+                      {tags.length > 0
+                        ? tags.map((tag) => <span className="ha-tag" key={tag}>{tag}</span>)
+                        : <span className="ha-muted">无必填</span>}
+                    </span>
+                  </button>
+                )
+              })}
+              {sessions.length === 0 ? <p className="ha-empty">还没有记录。</p> : null}
+            </div>
+          </div>
+        </section>
+      </div>
+      )}
 
       {/* 设置：居中 Modal */}
       {settingsOpen ? (
@@ -572,18 +834,21 @@ export function HealthView() {
             <div className="ha-modal-body">
               <div className="ha-group">
                 <div className="ha-group-title">模型与识图引擎</div>
-                <label className="ha-field"><span>文本抽取模型 · provider</span>
-                  <input className="ha-input" value={String(settings.extractionProvider ?? '')} placeholder="留空 = 沿用 DSH 默认"
-                    onChange={(e) => setSettings((c) => ({ ...c, extractionProvider: e.target.value }))} /></label>
-                <label className="ha-field"><span>文本抽取模型 · model</span>
-                  <input className="ha-input" value={String(settings.extractionModel ?? '')} placeholder="留空 = 沿用 DSH 默认"
-                    onChange={(e) => setSettings((c) => ({ ...c, extractionModel: e.target.value }))} /></label>
-                <label className="ha-field"><span>识图通道 · provider</span>
-                  <input className="ha-input" value={String(settings.visionProvider ?? '')} placeholder="留空 = 与抽取模型相同"
-                    onChange={(e) => setSettings((c) => ({ ...c, visionProvider: e.target.value }))} /></label>
-                <label className="ha-field"><span>识图通道 · model</span>
-                  <input className="ha-input" value={String(settings.visionModel ?? '')} placeholder="留空 = 与抽取模型相同"
-                    onChange={(e) => setSettings((c) => ({ ...c, visionModel: e.target.value }))} /></label>
+                <ModelPicker
+                  label="文本抽取模型"
+                  catalog={modelCatalog}
+                  provider={String(settings.extractionProvider ?? '')}
+                  model={String(settings.extractionModel ?? '')}
+                  onChange={(provider, model) => setSettings((c) => ({ ...c, extractionProvider: provider, extractionModel: model }))}
+                />
+                <ModelPicker
+                  label="识图通道"
+                  catalog={modelCatalog}
+                  provider={String(settings.visionProvider ?? '')}
+                  model={String(settings.visionModel ?? '')}
+                  emptyHint="留空 = 与抽取模型相同"
+                  onChange={(provider, model) => setSettings((c) => ({ ...c, visionProvider: provider, visionModel: model }))}
+                />
               </div>
 
               <div className="ha-group">
@@ -609,6 +874,74 @@ export function HealthView() {
                 <label className="ha-field"><span>未回复多久后升级（小时）</span>
                   <input className="ha-input" type="number" min={1} value={String(settings.escalateHours ?? 5)}
                     onChange={(e) => setSettings((c) => ({ ...c, escalateHours: Number(e.target.value) || 5 }))} /></label>
+              </div>
+
+              <div className="ha-group">
+                <div className="ha-group-title">计分标准</div>
+                <label className="ha-field"><span>蛋白质（克 / 公斤体重）</span>
+                  <input className="ha-input" type="number" step="0.1" min="0.5"
+                    value={String(targets?.protein_g_per_kg ?? 1.6)}
+                    onChange={(e) => setTargets((c) => ({
+                      protein_g_per_kg: Number(e.target.value) || 1.6,
+                      resistance_sessions_per_7d: c?.resistance_sessions_per_7d ?? 3,
+                      targetProteinG: c?.targetProteinG ?? null,
+                    }))} /></label>
+                <label className="ha-field"><span>每周抗阻次数</span>
+                  <input className="ha-input" type="number" step="1" min="1"
+                    value={String(targets?.resistance_sessions_per_7d ?? 3)}
+                    onChange={(e) => setTargets((c) => ({
+                      protein_g_per_kg: c?.protein_g_per_kg ?? 1.6,
+                      resistance_sessions_per_7d: Number(e.target.value) || 3,
+                      targetProteinG: c?.targetProteinG ?? null,
+                    }))} /></label>
+                <div className="ha-row gap8">
+                  <button className="ha-mini" onClick={() => void saveTargets(
+                    targets?.protein_g_per_kg ?? 1.6,
+                    targets?.resistance_sessions_per_7d ?? 3,
+                    true,
+                  )}>保存标准</button>
+                  <span className="ha-muted">
+                    {targets?.targetProteinG ? `当前目标 ${targets.targetProteinG} 克/天` : '先填档案体重才能算目标克数'}
+                  </span>
+                </div>
+                {logRows.length > 0 ? (
+                  <p className="ha-muted" style={{ margin: 0 }}>
+                    最近一次标准变更：{String(logRows[logRows.length - 1].sentence ?? '')}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="ha-group">
+                <div className="ha-group-title">记忆库</div>
+                <p className="ha-muted" style={{ margin: 0 }}>一个路径就是一个人；切换即换人，不做跨库合并。</p>
+                <label className="ha-field"><span>当前库</span>
+                  <select className="ha-input" value={activeLibrary}
+                    onChange={(e) => void switchLibrary(e.target.value)}>
+                    <option value="">（默认：~/.dsh/health-assessment）</option>
+                    {libraries.map((lib) => <option key={lib.path} value={lib.path}>{lib.codename} · {lib.path}</option>)}
+                  </select></label>
+                <label className="ha-field"><span>新增库路径</span>
+                  <input className="ha-input" value={newLibrary} placeholder="/Users/you/health-memory-b"
+                    onChange={(e) => setNewLibrary(e.target.value)} /></label>
+                <div className="ha-row gap8">
+                  <button className="ha-mini" onClick={() => void addLibrary()}>添加并切换</button>
+                </div>
+                <label className="ha-field"><span>从旧记忆库导入</span>
+                  <input className="ha-input" value={importPath} placeholder="旧库目录，只读不写"
+                    onChange={(e) => setImportPath(e.target.value)} /></label>
+                <div className="ha-row gap8">
+                  <button className="ha-mini" onClick={() => void runImport()}>导入旧库</button>
+                </div>
+              </div>
+
+              <div className="ha-group">
+                <div className="ha-group-title">诊断</div>
+                <div className="ha-row gap8" style={{ flexWrap: 'wrap' }}>
+                  <button className="ha-mini" onClick={() => void runDiagnostic('/followup/auto', '自动追问')}>立即自动检测</button>
+                  <button className="ha-mini" onClick={() => void runDiagnostic('/followup/ask', '手动追问')}>立即追问</button>
+                  <button className="ha-mini" onClick={() => void runDiagnostic('/pet/say', '宠物播报')}>测试桌宠</button>
+                </div>
+                {diag ? <p className="ha-muted" style={{ margin: 0 }}>{diag}</p> : null}
               </div>
 
               <div className="ha-group">
@@ -665,6 +998,65 @@ export function HealthView() {
         </div>
       ) : null}
 
+      {/* 选填录入 */}
+      {optionalOpen ? (
+        <OptionalDialog
+          date={date}
+          written={overview?.optional.written ?? {}}
+          onSaved={() => { void load() }}
+          onClose={() => setOptionalOpen(false)}
+          busy={busy}
+        />
+      ) : null}
+
+      {/* 单日详情 */}
+      {detailOpen ? (
+        <div className="ha-scrim" onClick={() => setDetailOpen(false)}>
+          <div className="ha-modal ha-modal-sm" onClick={(event) => event.stopPropagation()}>
+            <div className="ha-modal-head">
+              <span>{detailDate} 的记录</span>
+              <button className="ha-icon" title="关闭" onClick={() => setDetailOpen(false)}><Icon path={ICON.close} /></button>
+            </div>
+            <div className="ha-modal-body">
+              {detail ? (
+                <>
+                  <p className="ha-muted" style={{ margin: 0 }}>
+                    来源：{(detail.sources as string[] | undefined)?.join('、') || '未知'}
+                  </p>
+                  {(() => {
+                    const body = (detail.body_required ?? {}) as Record<string, unknown>
+                    const psych = (detail.psych_required ?? {}) as Record<string, unknown>
+                    const optional = (detail.optional ?? {}) as Record<string, unknown>
+                    const line = (label: string, value: unknown): JSX.Element => (
+                      <div className="ha-kv"><span className="ha-muted">{label}</span><span>{value === null || value === undefined || value === '' ? '—' : String(value)}</span></div>
+                    )
+                    return (
+                      <div className="ha-detail">
+                        {line('蛋白质(g)', body.protein_g)}
+                        {line('抗阻分钟', body.resistance_minutes)}
+                        {line('完成抗阻', body.resistance_done === true ? '是' : body.resistance_done === false ? '否' : null)}
+                        {line('超负荷', body.progressive_overload === true || body.overload === true ? '是' : null)}
+                        {line('自评', psych.self_rating_1_to_5 ?? psych.execution_likert)}
+                        {line('评价分类', psych.classification ?? psych.feedback_category)}
+                        {line('红旗', ((detail.red_flags ?? []) as string[]).join('、'))}
+                        <div className="ha-kv">
+                          <span className="ha-muted">选填</span>
+                          <span>{Object.keys(optional).length > 0 ? Object.entries(optional).map(([k, v]) => `${k}`).join('、') : '—'}</span>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </>
+              ) : <p className="ha-empty">这一天没有记录。</p>}
+            </div>
+            <div className="ha-modal-foot">
+              <button className="ha-ghost" onClick={() => void deleteDay()} disabled={busy}>删除这一天</button>
+              <button className="ha-primary" onClick={() => { setDetailOpen(false); setDate(detailDate) }}>切到这一天</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* 入库前确认 */}
       {confirming ? (
         <div className="ha-scrim" onClick={() => setConfirming(null)}>
@@ -684,6 +1076,84 @@ export function HealthView() {
             </div>
           </div>
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** 模型选择：用宿主真实目录下拉，选不到时可手填。 */
+function ModelPicker(props: {
+  label: string
+  catalog: { id: string; name: string; models: { id: string; name: string }[] }[]
+  provider: string
+  model: string
+  emptyHint?: string
+  onChange: (provider: string, model: string) => void
+}) {
+  const current = props.catalog.find((item) => item.id === props.provider)
+  const hint = props.emptyHint ?? '留空 = 沿用 DSH 默认'
+  return (
+    <>
+      <label className="ha-field"><span>{props.label} · provider</span>
+        <select className="ha-input" value={props.provider}
+          onChange={(event) => props.onChange(event.target.value, '')}>
+          <option value="">{hint}</option>
+          {props.catalog.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </label>
+      <label className="ha-field"><span>{props.label} · model</span>
+        <select className="ha-input" value={props.model}
+          onChange={(event) => props.onChange(props.provider, event.target.value)}>
+          <option value="">{hint}</option>
+          {(current?.models ?? []).map((model) => (
+            <option key={model.id} value={model.id}>{model.name || model.id}</option>
+          ))}
+        </select>
+      </label>
+    </>
+  )
+}
+
+/** 评分分项明细：5 项必填 + 选填得分，全部来自后端，不在前端重算。 */
+function PartsBreakdown({ overview }: { overview: Overview | null }) {
+  if (!overview) return null
+  const score = overview.score
+  const scores = score.scores
+  const parts = scores?.body_required?.parts ?? {}
+  const execution = scores?.psych_required?.execution ?? null
+  const classification = scores?.psych_required?.classification ?? null
+  const bodyOptional = scores as unknown as { body_optional?: { score?: number | null; items?: { item: string; points: number }[] } }
+  const psychOptional = scores as unknown as { psych_optional?: { score?: number | null; items?: { item: string; points: number }[] } }
+
+  const rows: { label: string; value: number }[] = []
+  for (const key of ['蛋白质', '抗阻', '超负荷']) {
+    const value = parts[key]
+    if (typeof value === 'number') rows.push({ label: key, value })
+  }
+  if (typeof execution === 'number') rows.push({ label: '自评分', value: execution })
+  if (typeof classification === 'number') rows.push({ label: '评价分类', value: classification })
+
+  const optionalItems = [
+    ...(bodyOptional.body_optional?.items ?? []),
+    ...(psychOptional.psych_optional?.items ?? []),
+  ]
+
+  return (
+    <div className="ha-parts">
+      {rows.length === 0 ? <p className="ha-empty">还没有可评分的必填。</p> : null}
+      {rows.map((row) => (
+        <div className="ha-parts-row" key={row.label}>
+          <span className="ha-parts-label">{row.label}</span>
+          <span className="ha-bar"><i style={{ width: `${Math.min(100, row.value * 100)}%` }} /></span>
+          <span className="ha-parts-num">{Math.round(row.value * 100)}%</span>
+        </div>
+      ))}
+      <div className="ha-parts-sub">
+        选填得分：身体 {bodyOptional.body_optional?.score ?? '无法评分'} / 心理 {psychOptional.psych_optional?.score ?? '无法评分'}
+        {optionalItems.length > 0 ? ` · 已计 ${optionalItems.length} 项` : ' · 未写选填'}
+      </div>
+      {score.next_steps?.length ? (
+        <ul className="ha-steps">{score.next_steps.map((step) => <li key={step}>{step}</li>)}</ul>
       ) : null}
     </div>
   )

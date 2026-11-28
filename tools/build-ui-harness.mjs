@@ -31,6 +31,7 @@ const overview = {
     { key: 'feedback', label: '外界评价处理', hint: '可测量就采纳，人身攻击就丢弃', done: false, value: '' },
   ],
   daily: { required_completion_ratio: 0.4 },
+  optional: { written: { 作息节律: 4, 目标感: 5 }, bodyCount: 1, psychCount: 1 },
   score: {
     mode: 'blocked_profile',
     scores: {
@@ -55,6 +56,7 @@ const entry = `
 import { createRoot } from 'react-dom/client'
 import { HealthView } from '../../src/client/health.tsx'
 import { injectStyles } from '../../src/client/styles.ts'
+import { OPTIONAL_GROUPS, OPTIONAL_HINTS } from '../../src/core/optional-catalog.ts'
 
 // 宿主在 apply() 里注入样式；验收台必须做同样的事，否则量到的是无样式页面。
 injectStyles()
@@ -67,6 +69,11 @@ globalThis.fetch = async (input, init) => {
   const url = String(input)
   if (url.includes('/overview')) return new Response(JSON.stringify(overview), { status: 200 })
   if (url.includes('/sessions')) return new Response(JSON.stringify(sessions), { status: 200 })
+  if (url.includes('/optional/catalog')) return new Response(JSON.stringify({ groups: OPTIONAL_GROUPS, hints: OPTIONAL_HINTS }), { status: 200 })
+  if (url.includes('/targets')) return new Response(JSON.stringify({ protein_g_per_kg: 1.6, resistance_sessions_per_7d: 3, targetProteinG: 120 }), { status: 200 })
+  if (url.includes('/models')) return new Response(JSON.stringify({ providers: [{ id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-flash', name: 'Flash' }] }] }), { status: 200 })
+  if (url.includes('/libraries')) return new Response(JSON.stringify({ libraries: [], active: '', root: '/tmp' }), { status: 200 })
+  if (url.includes('/log')) return new Response(JSON.stringify({ rows: [] }), { status: 200 })
   if (url.includes('/workspaces')) return new Response(JSON.stringify({ rows: [{ path: '/Users/zzz/Documents/deepseek-harness/default-workspace', name: 'default-workspace' }] }), { status: 200 })
   void realFetch
   return new Response(JSON.stringify({ ok: true }), { status: 200 })
@@ -101,50 +108,7 @@ const html = `<!doctype html>
 </style></head>
 <body><div id="host"><div id="root"></div></div>
 <script src="./app.js"></script>
-<script>
-// 验收度量：把关键几何与折行情况写进 #metrics，供 --dump-dom 读取。
-setTimeout(function () {
-  function rect(el) { return el ? el.getBoundingClientRect() : null }
-  function px(v) { return Math.round(v) }
-  var root = rect(document.querySelector('.ha-root'))
-  var main = rect(document.querySelector('.ha-main'))
-  var labels = [].map.call(
-    document.querySelectorAll('.ha-row-label, .ha-bar-label, .ha-metric span, .ha-title, .ha-pill'),
-    function (el) {
-      var r = el.getBoundingClientRect()
-      return { text: el.textContent, w: px(r.width), h: px(r.height), wrapped: r.height > 26 }
-    },
-  )
-  var icons = [].map.call(document.querySelectorAll('.ha-icon'), function (b) {
-    var r = b.getBoundingClientRect()
-    var svg = b.querySelector('svg')
-    var cs = getComputedStyle(b)
-    return { w: px(r.width), h: px(r.height), display: cs.display, title: b.getAttribute('title'),
-      svg: !!svg, svgSize: svg ? px(svg.getBoundingClientRect().width) : 0 }
-  })
-  var blocks = [].map.call(document.querySelectorAll('.ha-block'), function (b) {
-    return px(b.getBoundingClientRect().height)
-  })
-  var out = {
-    viewport: { w: window.innerWidth, h: window.innerHeight },
-    root: root && { w: px(root.width), h: px(root.height), bottom: px(root.bottom) },
-    main: main && { h: px(main.height), bottom: px(main.bottom) },
-    bottomGap: root ? px(window.innerHeight - root.bottom) : null,
-    blockHeights: blocks,
-    wrappedLabels: labels.filter(function (l) { return l.wrapped }),
-    labels: labels,
-    icons: icons,
-    profileCta: !!document.querySelector('.ha-profile-cta'),
-    heatCells: document.querySelectorAll('.ha-cell').length,
-    checklistRows: document.querySelectorAll('.ha-row').length,
-    ringText: (document.querySelector('.ha-ring-num') || {}).textContent,
-  }
-  var pre = document.createElement('pre')
-  pre.id = 'metrics'
-  pre.textContent = 'METRICS=' + JSON.stringify(out)
-  document.body.appendChild(pre)
-}, 1200)
-</script>
+<script src="./measure.js"></script>
 </body></html>`
 
 writeFileSync(join(outDir, 'demo.html'), html)
