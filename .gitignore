@@ -3,3 +3,6 @@ node_modules/
 *.zip
 tools/diff-failures.json
 .DS_Store
+tools/harness/entry.tsx
+tools/harness/app.js
+tools/harness/demo.html
